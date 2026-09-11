@@ -1,0 +1,2 @@
+.document-framer .df-path { overflow-wrap: anywhere; color: var(--text-muted); }
+.document-framer pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--font-smaller); user-select: text; }

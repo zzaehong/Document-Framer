@@ -1,0 +1,10 @@
+{
+  "name": "document-framer", "version": "0.1.0", "private": true,
+  "scripts": {
+    "build": "tsc --noEmit && node scripts/build.mjs",
+    "dev": "node scripts/build.mjs --watch",
+    "test": "tsx --test tests/*.test.ts",
+    "test:vault": "npm run build && node scripts/test-vault.mjs"
+  },
+  "devDependencies": { "@types/node": "^24.0.0", "esbuild": "^0.25.0", "obsidian": "^1.8.7", "tsx": "^4.20.0", "typescript": "^5.9.0" }
+}
