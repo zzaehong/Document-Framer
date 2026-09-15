@@ -1,3 +1,7 @@
+/**
+ * Obsidian 설정 화면: 호출 기록 확인, 미해결 요청 확인, API 키 저장·삭제와 연결 검사를 연결한다.
+ * 화면 이벤트는 main.ts의 메서드를 호출하며 실제 통신·저장은 각 담당 클래스에 맡긴다.
+ */
 import { App, PluginSettingTab, Setting, TextComponent } from 'obsidian';
 import type DocumentFramer from './main';
 import { MODEL } from './storage';
@@ -36,6 +40,7 @@ export class FramerSettingsTab extends PluginSettingTab {
     showState();
     let input: TextComponent;
     let busy = false;
+    // 설정 작업 중 중복 클릭을 막고 공통 상태 메시지를 갱신한다.
     const action = async (work: () => Promise<void>, success: string) => {
       if (busy) return;
       busy = true;
@@ -47,6 +52,7 @@ export class FramerSettingsTab extends PluginSettingTab {
     new Setting(el).setName('Gemini API 키').setDesc('Document Framer 전용 Obsidian 비밀 저장소에 저장합니다. 기존 키는 화면에 표시하지 않습니다.')
       .addText(text => { input = text; text.inputEl.type = 'password'; text.inputEl.autocomplete = 'off'; text.setPlaceholder('API 키 입력'); })
       .addButton(button => button.setButtonText('저장').onClick(() => {
+        // 입력값을 작업용 변수로 옮긴 뒤 화면을 즉시 비운다. 일반 설정 저장에 성공해야 키를 교체한다.
         const value = input.getValue(); input.setValue('');
         return action(async () => {
           await this.framer.saveSettings();

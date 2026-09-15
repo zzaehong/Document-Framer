@@ -1,3 +1,7 @@
+/**
+ * HTTP 통신 계층: 인증 헤더와 요청 구성, 호출 잠금, 제한된 재시도, 응답 JSON 추출을 담당한다.
+ * 분류 내용의 타당성은 classification.ts가 검증한다. 실제 전송 함수는 주입하여 테스트에서 대체한다.
+ */
 import { MODEL } from './storage';
 import { Attempt, readUsage } from './attempts';
 import { EvaluationTrace, GENERATION_CONFIG } from './evaluation';
@@ -29,6 +33,7 @@ export class GeminiClient {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let current: Attempt | undefined;
     const runId = trace?.runId ?? crypto.randomUUID();
+    // 동일 시도의 revision을 올려 스냅샷을 저장한다. 뒤늦은 이전 기록이 최신 상태를 덮지 않게 한다.
     const record = async () => {
       if (!current) return;
       current.revision++;
@@ -45,12 +50,14 @@ export class GeminiClient {
             contents: [{ role: 'user', parts: [{ text: JSON.stringify(input) }] }],
             generationConfig: { ...GENERATION_CONFIG, responseJsonSchema: schema } }),
         };
+        // 최대 두 번 전송한다. 네트워크 실패나 지정된 일시 HTTP 오류만 1초 뒤 한 번 재시도한다.
         for (let attempt = 1; attempt <= 2; attempt++) {
           if (stop()) throw new GeminiError('요청이 종료되었습니다.');
           current = { id: `${runId}:${attempt}`, revision: 0, sessionId: this.observer?.sessionId ?? this.sessionId,
             trace: trace ?? null, runId, purpose: trace?.purpose ?? 'connection', attemptNumber: attempt,
             requestedModel: MODEL, modelVersion: null, startedAt: Date.now(), endedAt: null, durationMs: null,
             transport: 'pending', outcome: 'pending', httpStatus: null, timedOutAt: null, usage: readUsage(null) };
+          // 전송 전 기록 저장이 실패하면 API를 호출하지 않고 미전송 상태를 남긴다.
           try { await record(); }
           catch (error) {
             current.transport = 'not-sent'; current.outcome = 'not-sent';
@@ -60,6 +67,7 @@ export class GeminiClient {
             current.transport = 'not-sent'; current.outcome = 'not-sent';
             await record(); throw new GeminiError('요청이 종료되었습니다.');
           }
+          // 실제 전송 시점부터 HTTP가 종료될 때까지 측정하므로 사전 기록 저장 시간은 제외한다.
           const sentAt = Date.now();
           let response: HttpResponse;
           try { response = await this.transport(request); }
@@ -88,6 +96,7 @@ export class GeminiClient {
               : response.status === 400 ? '요청 형식·지역·계정 설정을 확인하세요.' : '잠시 후 다시 요청하세요.';
             throw new GeminiError(`Gemini 오류 (${response.status}). ${hint}`);
           }
+          // 정상 종료된 단일 후보의 텍스트만 JSON으로 해석한다. 오류 응답 원문은 사용자 오류에 포함하지 않는다.
           try {
             const candidates = envelope?.candidates;
             if (envelope?.promptFeedback?.blockReason || !Array.isArray(candidates) || candidates.length !== 1 || candidates[0].finishReason !== 'STOP') throw new Error();
@@ -102,9 +111,11 @@ export class GeminiClient {
         throw new GeminiError('Gemini 요청에 실패했습니다.');
       } finally { this.busy = false; this.timedOut = false; }
     };
+    // 로컬 대기 시간과 실제 HTTP 수명을 분리한다. 시간 초과가 먼저 와도 operation의 잠금은 유지한다.
     const pending = operation();
     try {
       return await Promise.race([pending, new Promise<never>((_, reject) => {
+        // 시간 초과를 기록하고 호출자에게 실패를 알린다. 늦은 HTTP 응답은 위 operation에서 계속 정리한다.
         timer = setTimeout(() => {
           expired = true; this.timedOut = true;
           if (current && current.endedAt === null) { current.timedOutAt = Date.now(); void record().catch(() => {}); }

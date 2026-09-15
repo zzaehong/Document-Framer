@@ -1,3 +1,8 @@
+/**
+ * 플러그인의 진입점이자 연결 담당: Obsidian 이벤트, 처리 큐, 엔진, 저장소와 화면을 연결한다.
+ * 읽는 순서: onload() 등록 → request() 수동 요청 → tick() 대기 확인 및 처리 → 패널/모달 표시.
+ * 로컬 결과는 FrameStore에 저장하고, Gemini 결과는 previews 메모리에만 보관한다.
+ */
 import { ItemView, MarkdownView, Modal, Notice, Plugin, requestUrl, TFile, WorkspaceLeaf } from 'obsidian';
 import { Frame, ManualQueue, TestEngine } from './core';
 import { FrameStore, GeminiKey } from './storage';
@@ -6,8 +11,10 @@ import { GeminiClient, GeminiError } from './gemini';
 import { GeminiFramer, Preview } from './framing';
 import { AttemptJournal, attemptSummary } from './attempts';
 const VIEW = 'document-framer-view';
+// 비동기 작업이 시작한 파일 객체와 경로 세대를 기억한다. 같은 경로에 새 파일이 생겨도 구별한다.
 interface SourceTicket { path: string; file: TFile; generation: number }
 export default class DocumentFramer extends Plugin {
+  // 로컬 생성과 AI 미리보기는 요청·대기 상태를 각각 관리한다.
   queue = new ManualQueue();
   previewQueue = new ManualQueue();
   previews = new Map<string, Preview>();
@@ -28,6 +35,7 @@ export default class DocumentFramer extends Plugin {
   private stopped = false;
   private ticking = false;
   private storageError = false;
+  // 저장 상태를 복원한 뒤 명령·화면·파일 이벤트와 주기적 큐 검사를 등록한다.
   async onload() {
     try {
       this.store.load(await this.loadData());
@@ -41,6 +49,7 @@ export default class DocumentFramer extends Plugin {
     this.addCommand({ id: 'preview-gemini-frame', name: 'Gemini Framing 미리보기 요청', callback: () => { void this.request(true); } });
     this.addCommand({ id: 'inspect-gemini-attempts', name: 'Gemini 호출 기록·복구 보기', callback: () => this.showAttempts() });
     this.registerEvent(this.app.workspace.on('file-open', () => this.refresh()));
+    // 편집 중인 미저장 내용도 관찰하여 안정 대기 시간을 다시 계산한다.
     this.registerEvent(this.app.workspace.on('editor-change', (editor, info) => {
       if (info.file) this.observe(info.file, editor.getValue());
     }));
@@ -51,6 +60,7 @@ export default class DocumentFramer extends Plugin {
     this.registerEvent(this.app.vault.on('rename', (_file, oldPath) => this.invalidate(oldPath)));
     this.registerInterval(window.setInterval(() => { void this.tick(); }, 250));
   }
+  // 종료 후 후속 처리를 막는다. 진행 중인 원격 HTTP 요청 자체를 취소하는 것은 아니다.
   onunload() { this.stopped = true; this.client.close(); this.journal.close(); this.previews.clear(); }
   private observe(file: TFile, text: string) {
     if (!this.generations.has(file.path)) this.generations.set(file.path, 0);
@@ -62,6 +72,7 @@ export default class DocumentFramer extends Plugin {
     if (!this.generations.has(file.path)) this.generations.set(file.path, 0);
     return { path: file.path, file, generation: this.generations.get(file.path)! };
   }
+  // 경로 세대와 파일 객체가 모두 일치해야 이전 비동기 작업의 결과를 사용할 수 있다.
   private valid(ticket: SourceTicket) {
     return !this.stopped && this.generations.get(ticket.path) === ticket.generation
       && ticket.file.path === ticket.path && this.app.vault.getAbstractFileByPath(ticket.path) === ticket.file;
@@ -75,10 +86,12 @@ export default class DocumentFramer extends Plugin {
     }
     this.refresh();
   }
+  // 현재 편집 문서는 디스크보다 편집기 내용을 우선하여 미저장 변경까지 읽는다.
   private async read(file: TFile) {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     return view?.file === file ? view.editor.getValue() : this.app.vault.read(file);
   }
+  // 실행 의사를 큐에 표시하는 진입점. 문서 관찰만으로는 작업이 요청되지 않는다.
   async request(preview = false) {
     if (this.stopped) return;
     const file = this.app.workspace.getActiveFile();
@@ -97,6 +110,7 @@ export default class DocumentFramer extends Plugin {
       await this.tick();
     } catch { if (this.valid(ticket)) this.fail(file.path, '원문 읽기 또는 패널 열기에 실패했습니다. 다시 요청하세요.'); }
   }
+  // 250ms마다 호출되지만 앞선 tick이 끝나기 전에는 재진입하지 않는다.
   private async tick() {
     if (this.ticking || this.stopped) return;
     this.ticking = true;
@@ -107,6 +121,7 @@ export default class DocumentFramer extends Plugin {
           if (!(file instanceof TFile)) throw new Error('문서가 삭제되거나 이동되었습니다. 다시 요청하세요.');
           const text = await this.read(file);
           this.observe(file, text);
+          // 실행 직전 다시 읽은 내용이 바뀌었다면 요청을 되돌려 60초 대기를 이어간다.
           if (this.queue.remaining(path, Date.now()) > 0) {
             this.queue.finish(path); this.queue.request(path); continue;
           }
@@ -119,6 +134,7 @@ export default class DocumentFramer extends Plugin {
           this.fail(path, error instanceof Error ? `처리 실패: ${error.message} 다시 요청할 수 있습니다.` : '저장에 실패했습니다. 다시 요청하세요.');
         } finally { this.queue.finish(path); }
       }
+      // AI 처리 후보의 파일 신원을 미리 캡처하여 앞선 요청을 기다리는 동안의 삭제·이동도 감지한다.
       const ready = this.previewQueue.takeReady(Date.now()).map(path => {
         const file = this.app.vault.getAbstractFileByPath(path);
         return { path, ticket: file instanceof TFile ? this.ticket(file) : null };
@@ -137,6 +153,7 @@ export default class DocumentFramer extends Plugin {
           this.ensureGeminiReady();
           const preview = await this.framer.generate({ path, basename: file.basename, ctime: file.stat.ctime, mtime: file.stat.mtime, text }, this.key.read() ?? '', 'classification', () => this.valid(ticket));
           if (!this.valid(ticket)) continue;
+          // 검증된 결과만 메모리에 게시한다. 저장된 로컬 Frame은 이 경로에서 갱신하지 않는다.
           this.previews.set(path, preview);
           this.previewStatuses.set(path, '미리보기 생성 완료 · 요청 당시 원문 기준');
         } catch (error) {
@@ -157,6 +174,7 @@ export default class DocumentFramer extends Plugin {
       throw new Error('연결 응답 검증 또는 비밀 저장소 확인에 실패했습니다.');
     }
   }
+  // 저장소 오류나 이전 세션 미해결 호출이 있으면 새로운 전송을 시작하지 않는다.
   private ensureGeminiReady() {
     if (this.stopped) throw new GeminiError('플러그인이 종료되었습니다.');
     if (this.storageError) throw new GeminiError('저장소 오류를 해결한 후 플러그인을 다시 켜세요.');
@@ -172,6 +190,7 @@ export default class DocumentFramer extends Plugin {
     if (preview) new PreviewModal(this.app, preview).open();
   }
   refresh() { if (!this.stopped) this.app.workspace.getLeavesOfType(VIEW).forEach(leaf => (leaf.view as FrameView).render()); }
+  // 이미 열린 패널을 재사용하고, 없으면 오른쪽 영역에 생성한다.
   async openPanel() {
     let leaf = this.app.workspace.getLeavesOfType(VIEW)[0];
     if (!leaf) { const right = this.app.workspace.getRightLeaf(false); if (!right) return; leaf = right; await leaf.setViewState({ type: VIEW, active: true }); }
@@ -179,6 +198,7 @@ export default class DocumentFramer extends Plugin {
     this.refresh();
   }
 }
+// 현재 문서의 대기 상태, 저장된 로컬 결과와 Gemini 미리보기 진입 버튼을 표시한다.
 class FrameView extends ItemView {
   private signature = '';
   constructor(leaf: WorkspaceLeaf, private plugin: DocumentFramer) { super(leaf); }
@@ -197,6 +217,7 @@ class FrameView extends ItemView {
     const state = path && this.plugin.queue.pending(path)
       ? `안정 대기 중 · ${Math.ceil(this.plugin.queue.remaining(path, Date.now()) / 1000)}초 남음`
       : path ? this.plugin.statuses.get(path) ?? '수동 요청 대기' : 'Markdown 문서를 열어주세요.';
+    // 주기적으로 refresh되어도 표시할 값이 같으면 DOM을 다시 만들지 않는다.
     const signature = JSON.stringify([path, state, frame, previewState, preview?.frame.generatedAt, this.plugin.connectionState, this.plugin.journal.persistenceError, this.plugin.journal.needsAcknowledgement]);
     if (signature === this.signature) return;
     this.signature = signature;
@@ -233,6 +254,7 @@ class FrameView extends ItemView {
   }
 }
 
+// 요청 당시 원문 스냅샷에서 지식 단위별 범위를 잘라 보여주는 읽기 전용 창이다.
 class PreviewModal extends Modal {
   constructor(app: DocumentFramer['app'], private preview: Preview) { super(app); }
   onOpen() {
@@ -255,6 +277,7 @@ class PreviewModal extends Modal {
   onClose() { this.contentEl.empty(); }
 }
 
+// 창을 여는 시점의 호출 이력과 평가 추적 정보를 표시한다.
 class AttemptModal extends Modal {
   constructor(app: DocumentFramer['app'], private plugin: DocumentFramer) { super(app); }
   onOpen() {

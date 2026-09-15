@@ -1,3 +1,4 @@
+/** 기존 동작을 확인하는 자동 테스트. 각 사례 위 주석은 보장하려는 조건을 설명한다. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -13,6 +14,7 @@ const response = (classification: unknown = value): HttpResponse => ({ status: 2
 const generate = (client: GeminiClient) => client.generate('dummy-secret', 'system', {}, {});
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
+// 연결 검사·분류·재시도별 기록을 구분하고 해시·버전·생성 설정이 기록되는지 확인한다.
 test('retries, connection and classification have independent attempt records and complete local provenance', async () => {
   let saved: Attempt[] = [];
   let calls = 0;
@@ -43,6 +45,7 @@ test('retries, connection and classification have independent attempt records an
   assert.notEqual(await sourceHash(source.text), await sourceHash(source.text.replace('\r\n', '\n')));
 });
 
+// 분류 실패나 차단 응답에서도 사용량을 보존하고 누락 수치는 미확인으로 남기는지 확인한다.
 test('usage survives schema failure, blocked output and network retry; absent fields stay unknown', async () => {
   const journal = new AttemptJournal(async () => {});
   let client = new GeminiClient(async () => response({}), undefined, 1000, journal);
@@ -65,6 +68,7 @@ test('usage survives schema failure, blocked output and network retry; absent fi
   assert.match(attemptSummary(journal.attempts[2]), /미확인/);
 });
 
+// 시간 초과 후 늦은 응답이 같은 기록을 갱신하고 HTTP 종료 후 잠금이 풀리는지 확인한다.
 test('timeout retains lock; late response updates exactly one attempt and restores local availability', async () => {
   let saved: Attempt[] = [];
   const journal = new AttemptJournal(async attempts => { saved = structuredClone(attempts); });
@@ -86,6 +90,7 @@ test('timeout retains lock; late response updates exactly one attempt and restor
   assert.equal(saved.length, 1); assert.equal(saved[0].usage.tokens.totalTokenCount, 18);
 });
 
+// 재시작 시 미해결 요청을 보존하고 사용자 확인을 요구하되 자동 재전송하지 않는지 확인한다.
 test('restart retains unresolved attempts and requires acknowledgement without replay or permanent block', async () => {
   let saved: Attempt[] = [];
   const old = new AttemptJournal(async attempts => { saved = structuredClone(attempts); });
@@ -105,6 +110,7 @@ test('restart retains unresolved attempts and requires acknowledgement without r
   assert.equal(third.needsAcknowledgement, true, 'new session asks again while remote completion is unknown');
 });
 
+// 호출 기록 저장 실패는 전송을 막고 복구 확인 저장 실패도 차단을 해제하지 않는지 확인한다.
 test('record persistence failure prevents HTTP and acknowledgement failure does not unlock recovery', async () => {
   const journal = new AttemptJournal(async () => { throw new Error('disk'); });
   let calls = 0;
@@ -118,6 +124,7 @@ test('record persistence failure prevents HTTP and acknowledgement failure does 
   assert.equal(journal.needsAcknowledgement, true);
 });
 
+// 전송 도중 요청이 무효화되면 재시도하지 않으면서 수신 사용량은 남기는지 확인한다.
 test('invalidation during HTTP suppresses retry while preserving returned usage', async () => {
   const journal = new AttemptJournal(async () => {});
   let valid = true;
@@ -131,6 +138,7 @@ test('invalidation during HTTP suppresses retry while preserving returned usage'
   assert.equal(journal.attempts[0].usage.tokens.totalTokenCount, 18);
 });
 
+// 호출 기록·Frame·설정의 저장이 겹쳐도 각 데이터를 보존하는지 확인한다.
 test('journal writes serialize with Frame/settings persistence without replacing either data set', async () => {
   const { FrameStore } = await import('../src/storage');
   const { TestEngine } = await import('../src/core');

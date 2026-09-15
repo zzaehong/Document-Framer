@@ -1,3 +1,4 @@
+/** 기존 동작을 확인하는 자동 테스트. 각 사례 위 주석은 보장하려는 조건을 설명한다. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { extractBlocks } from '../src/blocks';
@@ -9,6 +10,7 @@ const valid = (ids = ['b1', 'b2']): Classification => ({
   type: { id: 'prose-with-decision', confidence: 0.9 },
   units: [{ blockIds: ids, labels: [{ id: 'observation', confidence: 0.7 }, { id: 'decision', confidence: 0.9 }] }],
 });
+// 여러 Markdown 요소와 한글·이모지·CRLF에서도 블록의 원문 범위가 정확한지 확인한다.
 test('blocks retain exact CRLF and Unicode offsets across headings, lists, quotes, tables and fences', () => {
   const text = '\uFEFF---\r\ntitle: 테스트\r\n---\r\n\r\n# 제목 😀\r\n\r\n- 하나\r\n  - 둘\r\n\r\n> 인용\r\n> 계속\r\n\r\n| A | B |\r\n| - | - |\r\n| 1 | 2 |\r\n\r\n````md\r\n# 코드\r\n\r\n```\r\n````\r\n\r\n마지막';
   const blocks = extractBlocks(text);
@@ -18,6 +20,7 @@ test('blocks retain exact CRLF and Unicode offsets across headings, lists, quote
   assert.equal(blocks.at(-1)?.source.endOffset, text.length);
   assert.deepEqual(extractBlocks(text), blocks);
 });
+// 빈 문서와 닫히지 않은 코드 울타리 등에서도 읽을 수 있는 원문이 잘리지 않는지 확인한다.
 test('empty, malformed Markdown and unclosed fences retain readable content without truncation', () => {
   assert.deepEqual(extractBlocks(' \n\t\r\n'), []);
   for (const text of ['~~~\n# not heading\n\n끝', '---\nx: y\n끝', '문장\n## heading\n끝', '😀\r끝', '[link](url)', '    code\n    more']) {
@@ -27,6 +30,7 @@ test('empty, malformed Markdown and unclosed fences retain readable content with
     assert.equal(blocks.at(-1)?.source.endOffset, text.length);
   }
 });
+// 복수 분야·계층형 분야 ID·복수 라벨과 분류 불가 값이 계약에 맞으면 허용하는지 확인한다.
 test('valid multi-domain, hierarchy IDs, multi-label and Other/unclassified accepted', () => {
   const blocks = extractBlocks('# 제목\n\n결정 내용');
   assert.deepEqual(validateClassification(valid(), blocks), valid());
@@ -35,6 +39,7 @@ test('valid multi-domain, hierarchy IDs, multi-label and Other/unclassified acce
   other.units[0].labels = [{ id: 'unclassified', confidence: 0 }];
   assert.deepEqual(validateClassification(other, blocks), other);
 });
+// 알 수 없는 분류·추가 필드·잘못된 확신도와 블록 누락·중복·순서 변경을 거부하는지 확인한다.
 test('schema rejects unknown taxonomy, extra fields, confidence errors and missing/duplicate/reordered block coverage', () => {
   const blocks = extractBlocks('# 제목\n\n결정 내용');
   const mutations: ((v: any) => void)[] = [
@@ -48,6 +53,7 @@ test('schema rejects unknown taxonomy, extra fields, confidence errors and missi
   ];
   for (const mutate of mutations) { const v = valid(); mutate(v); assert.throws(() => validateClassification(v, blocks), /검증 실패/); }
 });
+// 문서당 한 번 호출하고 ID·텍스트만 전송하며 메타데이터·원문 위치는 로컬에서 조립하는지 확인한다.
 test('one document call constructs preview with local metadata and locations; only IDs/text sent', async () => {
   const requests: HttpRequest[] = [];
   const framer = new GeminiFramer(new GeminiClient(async request => {
@@ -69,6 +75,7 @@ test('one document call constructs preview with local metadata and locations; on
   assert.equal(preview.frame.document.importance, null);
   assert.equal(preview.frame.knowledgeUnits[0].highlight, false);
 });
+// 입력 한도 오류는 전송 전에 막고 잘못된 분류를 고치려는 추가 API 호출은 하지 않는지 확인한다.
 test('empty/oversized/too many blocks fail before network; invalid classification never triggers repair call', async () => {
   let calls = 0;
   const framer = new GeminiFramer(new GeminiClient(async () => { calls++; return { status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '{}' }] } }] }) }; }));

@@ -1,3 +1,7 @@
+/**
+ * 로컬 테스트 Vault에 빌드 결과·manifest·스타일을 설치하고 플러그인 활성화 목록을 작성한다.
+ * 예제 노트는 wx 옵션으로 처음에만 생성하여 기존 테스트 내용을 덮어쓰지 않는다.
+ */
 import { mkdir, copyFile, writeFile } from 'node:fs/promises';
 const root = '.test-vault';
 const plugin = `${root}/.obsidian/plugins/document-framer`;

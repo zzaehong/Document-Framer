@@ -1,8 +1,10 @@
+/** 기존 동작을 확인하는 자동 테스트. 각 사례 위 주석은 보장하려는 조건을 설명한다. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { FrameStore, GeminiKey, decodeSaved, SECRET_ID } from '../src/storage';
 import { TestEngine } from '../src/core';
 const frame = new TestEngine().generate({ path: 'a.md', basename: 'a', text: '내용', ctime: 0, mtime: 0 });
+// 구버전 Frame을 보존하며 설정과 Frame의 동시 저장이 데이터 손실 없이 직렬화되는지 확인한다.
 test('legacy migration preserves Frames; settings and Frame writes serialize without loss', async () => {
   const writes: unknown[] = [];
   const store = new FrameStore(async value => { writes.push(structuredClone(value)); });
@@ -13,6 +15,7 @@ test('legacy migration preserves Frames; settings and Frame writes serialize wit
   assert.equal(store.state.version, 2);
   assert.deepEqual(decodeSaved(writes.at(-1)), store.state);
 });
+// 저장 실패 시 이전 상태를 보존하고 이후 저장은 복구하며 알 수 없는 저장 형식을 거부하는지 확인한다.
 test('failed writes preserve previous state and later writes recover; unknown storage rejected', async () => {
   let fail = true;
   const store = new FrameStore(async () => { if (fail) throw new Error('disk'); });
@@ -24,6 +27,7 @@ test('failed writes preserve previous state and later writes recover; unknown st
   assert.deepEqual(Object.keys(store.state.frames), ['a.md']);
   for (const value of [{ version: 9, frames: {} }, { version: 1, frames: [] }, { version: 2, frames: {} }]) assert.throws(() => decodeSaved(value));
 });
+// 키가 공식 비밀 저장소만 사용하고 삭제·입력 검사·오류 메시지에서도 비밀값이 보호되는지 확인한다.
 test('keys use only the official secret store; clearing removes usable value, errors redact secrets', () => {
   const values = new Map<string, string>();
   const key = new GeminiKey({ getSecret: id => values.get(id) ?? null, setSecret: (id, value) => { values.set(id, value); } });
@@ -35,6 +39,7 @@ test('keys use only the official secret store; clearing removes usable value, er
   assert.throws(() => new GeminiKey({ getSecret: () => { throw new Error('secret'); }, setSecret() {} }).read(), /비밀 저장소를 읽지/);
 });
 
+// 기본 모델 설정만 이전하고 기존 Frame과 과거 호출의 생성 조건은 유지하는지 확인한다.
 test('previous model settings migrate while Frames and historical attempts remain unchanged', async () => {
   const oldAttempt = { id: 'old:1', revision: 1, sessionId: 'old-session', runId: 'old', purpose: 'classification', transport: 'settled', requestedModel: 'gemini-2.5-flash-lite', modelVersion: 'gemini-2.5-flash-lite-001', trace: { generationConfig: { thinkingConfig: { thinkingBudget: 0 }, temperature: 0 } }, usage: { status: 'unknown', tokens: {} } };
   const previous = { version: 2, settings: { model: 'gemini-2.5-flash-lite', secretId: SECRET_ID }, frames: { 'a.md': frame }, attempts: [oldAttempt] };

@@ -1,3 +1,7 @@
+/**
+ * 영구 저장 계층: data.json의 형식 복원과 순차 저장을 담당한다.
+ * 로컬 Frame·설정·호출 기록은 함께 저장하고, API 키는 Obsidian 비밀 저장소로 분리한다.
+ */
 import { Frame } from './core';
 import { Attempt, decodeAttempts } from './attempts';
 
@@ -7,6 +11,7 @@ export interface Settings { model: typeof MODEL; secretId: typeof SECRET_ID }
 export interface Saved { version: 2; settings: Settings; frames: Record<string, Frame>; attempts: Attempt[] }
 const defaults = (): Saved => ({ version: 2, settings: { model: MODEL, secretId: SECRET_ID }, frames: Object.create(null), attempts: [] });
 
+// 처음 실행이면 기본값을 만들고, 기존 데이터는 지원 버전·설정만 받아 현재 저장 구조로 복원한다.
 export function decodeSaved(value: unknown): Saved {
   if (value == null) return defaults();
   if (typeof value !== 'object' || Array.isArray(value)) throw new Error('Unsupported storage');
@@ -21,6 +26,7 @@ export function decodeSaved(value: unknown): Saved {
   return { ...defaults(), frames: Object.assign(Object.create(null), data.frames), attempts: decodeAttempts(data.attempts) };
 }
 
+// 모든 저장 경로가 하나의 Promise 사슬을 공유하여 동시에 저장해도 서로의 데이터를 덮어쓰지 않는다.
 export class FrameStore {
   state = defaults();
   private writes: Promise<void> = Promise.resolve();
@@ -30,9 +36,11 @@ export class FrameStore {
     // 설정 저장과 Frame 저장이 겹쳐도 직전 성공 상태를 기준으로 병합한다.
     const result = this.writes.then(async () => {
       const next = change(this.state);
+      // 디스크 저장이 성공한 뒤에만 메모리 상태를 교체한다.
       await this.write(next);
       this.state = next;
     });
+    // 실패는 이번 호출자에게 전달하되 내부 사슬을 복구하여 다음 저장이 계속 실행되게 한다.
     this.writes = result.catch(() => {});
     return result;
   }
@@ -44,6 +52,7 @@ export class FrameStore {
 }
 
 export interface SecretStorage { getSecret(id: string): string | null; setSecret(id: string, value: string): void }
+// 키 원문은 전용 비밀 저장소에서만 읽고 쓴다. 일반 설정에는 비밀 항목 ID만 남긴다.
 export class GeminiKey {
   constructor(private storage: SecretStorage | undefined) {}
   get supported() { return !!this.storage; }

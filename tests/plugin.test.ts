@@ -1,3 +1,4 @@
+/** 기존 동작을 확인하는 자동 테스트. 각 사례 위 주석은 보장하려는 조건을 설명한다. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSync } from 'esbuild';
@@ -10,6 +11,7 @@ async function waitFor(predicate: () => boolean) {
   for (let i = 0; i < 1000 && !predicate(); i++) await new Promise(resolve => setTimeout(resolve, 1));
   assert.ok(predicate(), 'async operation did not reach expected state');
 }
+// Obsidian의 파일·화면·저장소·HTTP를 가짜 객체로 대체한다. advance()로 실제 60초 대기 없이 시간을 진행한다.
 function harness() {
   let now = 100_000;
   let saved: unknown = null;
@@ -69,6 +71,7 @@ function harness() {
     saveData = async (value: unknown) => { if (failSave) throw new Error('disk full'); saved = structuredClone(value); };
     registerView() {} addRibbonIcon() {} addCommand() {} registerEvent() {} registerInterval() {} addSettingTab(tab: unknown) { settingsTab = tab; }
   }
+  // 번들을 별도 실행 문맥에서 로드하고 모듈·시계·HTTP를 위 테스트용 구현에 연결한다.
   const context = { module: { exports: {} as any }, require: () => ({ Plugin, TFile, ItemView: class {}, Modal, MarkdownView: class {}, Notice: class {}, Setting,
     PluginSettingTab: class { containerEl = new Element(); },
     requestUrl: async (request: HttpRequest) => { requests.push(request); return responder(request); },
@@ -79,6 +82,7 @@ function harness() {
     respond(fn: typeof responder) { responder = fn; }, seed(value: unknown) { saved = value; },
     get content() { return content; }, set content(value: string) { content = value; }, advance(ms: number) { now += ms; }, failSave() { failSave = true; }, get saved() { return saved; } };
 }
+// 삭제·이름 변경·경로 복귀·재사용 뒤 늦은 성공이나 실패가 이전 화면 상태를 되살리지 않는지 확인한다.
 test('late success/failure cannot restore previews or statuses after delete, rename, return or path reuse', async () => {
   for (const change of ['delete', 'rename', 'return', 'reuse']) for (const success of [true, false]) {
     const h = harness(); const plugin = h.create(); await plugin.onload(); plugin.key.save('key'); h.advance(60_000);
@@ -100,6 +104,7 @@ test('late success/failure cannot restore previews or statuses after delete, ren
     assert.equal((h.saved as any).attempts[0].usage.tokens.totalTokenCount, success ? 15 : null);
   }
 });
+// 수동 요청부터 대기·생성·저장·재시작 복원까지 연결되고 원문이 유지되는지 확인한다.
 test('plugin request → waiting → generation → persistence → reload; source stays intact', async () => {
   const h = harness(); const plugin = h.create(); await plugin.onload();
   const original = h.content;
@@ -113,6 +118,7 @@ test('plugin request → waiting → generation → persistence → reload; sour
   assert.match(reloaded.statuses.get('test.md'), /실패/);
   assert.equal(reloaded.frames['test.md'].document.title, '테스트');
 });
+// 편집 시 대기가 연장되고 플러그인 종료 후에는 처리가 진행되지 않는지 확인한다.
 test('editor changes extend an outstanding request; unload prevents processing', async () => {
   const h = harness(); const plugin = h.create(); await plugin.onload(); await plugin.request();
   h.advance(30_000); h.content = '# 수정';
@@ -123,6 +129,7 @@ test('editor changes extend an outstanding request; unload prevents processing',
   h.content = '# unload'; await second.request(); h.advance(60_000); await second.tick();
   assert.equal(second.frames['test.md'].document.title, '수정');
 });
+// 설정 화면의 키 저장·복원·연결·삭제 흐름과 data.json에 키가 남지 않는지 확인한다.
 test('settings UI saves, reloads, checks and deletes key without placing it in data.json', async () => {
   const h = harness(); const plugin = h.create(); await plugin.onload();
   await plugin.request(); h.advance(60_000); await plugin.tick();
@@ -147,6 +154,7 @@ test('settings UI saves, reloads, checks and deletes key without placing it in d
   assert.equal(reloaded.key.read(), null);
   assert.ok(!JSON.stringify(h.saved).includes('dummy-secret'));
 });
+// AI 요청의 안정 대기·중복 클릭 처리를 확인하고 미리보기가 영구 Frame을 바꾸지 않는지 확인한다.
 test('Gemini request respects stability and duplicate clicks; preview never updates persisted active Frame', async () => {
   const h = harness(); const plugin = h.create(); await plugin.onload();
   plugin.key.save('dummy-secret');
@@ -178,6 +186,7 @@ test('Gemini request respects stability and duplicate clicks; preview never upda
   const reloaded = h.create(); await reloaded.onload(); assert.equal(reloaded.previews.size, 0);
   assert.equal(reloaded.frames[h.file.path].document.title, '테스트');
 });
+// 키가 없으면 호출하지 않고 종료 후 늦게 도착한 미리보기는 버리는지 확인한다.
 test('missing key makes no API call; unload discards a late preview response', async () => {
   const h = harness(); const plugin = h.create(); await plugin.onload();
   await plugin.request(true); h.advance(60_000); await plugin.tick();
@@ -192,6 +201,7 @@ test('missing key makes no API call; unload discards a late preview response', a
   assert.equal(plugin.previews.size, 0); assert.equal(Object.keys((h.saved as any).frames).length, 0);
   assert.equal((h.saved as any).attempts[0].transport, 'pending');
 });
+// 구버전은 실제 저장 시 이전하고 미지원 저장 형식에서는 변경을 막는지 확인한다.
 test('legacy data loads and migrates only on write; unsupported storage blocks mutation', async () => {
   const h = harness(); const first = h.create(); await first.onload();
   await first.request(); h.advance(60_000); await first.tick();
@@ -205,6 +215,7 @@ test('legacy data loads and migrates only on write; unsupported storage blocks m
   await assert.rejects(bad.saveSettings()); await bad.request();
   assert.equal((h.saved as any).version, 999);
 });
+// 설정 저장 실패 시 키·Frame을 유지하고 비밀 저장소 미지원 시 키 입력 UI를 막는지 확인한다.
 test('settings write failure preserves existing key and Frame; unsupported secret storage disables key controls', async () => {
   const h = harness(); const plugin = h.create(); await plugin.onload();
   plugin.key.save('original-key');
@@ -219,6 +230,7 @@ test('settings write failure preserves existing key and Frame; unsupported secre
   other.settingsTab.display(); assert.ok(!other.settings.some(s => s.name === 'Gemini API 키'));
 });
 
+// 재시작 후 미해결 호출을 표시하고 명시적 확인 전 새 요청을 막으며 자동 재전송하지 않는지 확인한다.
 test('restarted plugin shows unresolved request, requires explicit risk acknowledgement, and never auto-replays', async () => {
   const h = harness(); const old = h.create(); await old.onload(); old.key.save('key'); h.advance(60_000);
   old.client.timeoutMs = 15;
@@ -258,6 +270,7 @@ test('restarted plugin shows unresolved request, requires explicit risk acknowle
   assert.match(text, /분류/);
 });
 
+// 이전 HTTP가 진행 중이어도 재사용 경로의 새 요청 상태를 이전 작업이 지우지 않는지 확인한다.
 test('new file at reused path can request while old HTTP is pending without old result clearing its job', async () => {
   const h = harness(); const plugin = h.create(); await plugin.onload(); plugin.key.save('key'); h.advance(60_000);
   let finish!: (value: HttpResponse) => void;
