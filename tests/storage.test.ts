@@ -12,7 +12,7 @@ test('legacy migration preserves Frames; settings and Frame writes serialize wit
   await Promise.all([store.saveSettings(), store.saveFrame('b.md', frame), store.saveSettings()]);
   assert.deepEqual(Object.keys(store.state.frames), ['a.md', 'b.md']);
   assert.deepEqual(store.state.frames['a.md'], frame);
-  assert.equal(store.state.version, 2);
+  assert.equal(store.state.version, 3);
   assert.deepEqual(decodeSaved(writes.at(-1)), store.state);
 });
 // 저장 실패 시 이전 상태를 보존하고 이후 저장은 복구하며 알 수 없는 저장 형식을 거부하는지 확인한다.

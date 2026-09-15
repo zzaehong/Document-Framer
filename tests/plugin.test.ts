@@ -26,14 +26,14 @@ function harness() {
   let responder = async (request: HttpRequest): Promise<HttpResponse> => {
     const input = JSON.parse(JSON.parse(request.body).contents[0].parts[0].text);
     return { status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({
-      domains: [{ id: 'other', confidence: 0.3 }], type: { id: 'idea-note', confidence: 0.6 },
+      domains: [{ path: ['Other'], source: 'unclassified', confidence: 0.3 }], type: { id: 'idea-note', confidence: 0.6 },
       units: input.blocks.map((b: any) => ({ blockIds: [b.id], labels: [{ id: 'idea', confidence: 0.5 }] })),
     }) }] } }] }) };
   };
   class Element {
-    text = ''; children: Element[] = [];
+    text = ''; tag = ''; children: Element[] = []; disabled = false; onclick?: () => void; open = false;
     empty() { this.children = []; } addClass() {}
-    createEl(_tag: string, options?: { text?: string }) { const el = new Element(); el.text = options?.text ?? ''; this.children.push(el); return el; }
+    createEl(_tag: string, options?: { text?: string }) { const el = new Element(); el.tag = _tag; el.text = options?.text ?? ''; this.children.push(el); return el; }
     setText(value: string) { this.text = value; }
   }
   class Text {
@@ -80,7 +80,7 @@ function harness() {
   const create = () => new context.module.exports.default();
   return { create, file, createFile: () => new TFile(), events, vaultEvents, secrets, requests, settings, modals, get settingsTab() { return settingsTab; },
     respond(fn: typeof responder) { responder = fn; }, seed(value: unknown) { saved = value; },
-    get content() { return content; }, set content(value: string) { content = value; }, advance(ms: number) { now += ms; }, failSave() { failSave = true; }, get saved() { return saved; } };
+    get content() { return content; }, set content(value: string) { content = value; }, advance(ms: number) { now += ms; }, failSave() { failSave = true; }, recoverSave() { failSave = false; }, get saved() { return saved; } };
 }
 // 삭제·이름 변경·경로 복귀·재사용 뒤 늦은 성공이나 실패가 이전 화면 상태를 되살리지 않는지 확인한다.
 test('late success/failure cannot restore previews or statuses after delete, rename, return or path reuse', async () => {
@@ -95,7 +95,7 @@ test('late success/failure cannot restore previews or statuses after delete, ren
     if (change === 'return') { h.file.path = 'test.md'; h.vaultEvents.rename(h.file, 'moved.md'); }
     if (change === 'delete') plugin.app.vault.getAbstractFileByPath = () => null;
     if (change === 'reuse') plugin.app.vault.getAbstractFileByPath = () => ({ ...h.file });
-    finish(success ? { status: 200, text: JSON.stringify({ usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 }, candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: [{ id: 'other', confidence: 0 }], type: { id: 'idea-note', confidence: 0 }, units: [{ blockIds: ['b1', 'b2'], labels: [{ id: 'idea', confidence: 0 }] }] }) }] } }] }) } : { status: 403, text: '' });
+    finish(success ? { status: 200, text: JSON.stringify({ usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 }, candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: [{ path: ['Other'], source: 'unclassified', confidence: 0 }], type: { id: 'idea-note', confidence: 0 }, units: [{ blockIds: ['b1', 'b2'], labels: [{ id: 'idea', confidence: 0 }] }] }) }] } }] }) } : { status: 403, text: '' });
     await pending;
     assert.equal(plugin.previews.has('test.md'), false, change);
     assert.equal(plugin.previewStatuses.has('test.md'), false, change);
@@ -173,9 +173,9 @@ test('Gemini request respects stability and duplicate clicks; preview never upda
   plugin.showPreview(h.file.path);
   const elements = (el: any): any[] => [el, ...el.children.flatMap(elements)];
   const shown = elements(h.modals[0].contentEl).map(el => el.text);
-  assert.ok(shown.includes('Gemini Frame 미리보기'));
+  assert.ok(shown.includes('Gemini Frame 검토'));
   assert.ok(shown.includes('# 새 제목\r\n'));
-  assert.ok(shown.some(text => text.includes('재시작하면 사라집니다')));
+  assert.ok(shown.some(text => text.includes('재시작하면 사라지며')));
   const before = preview;
   h.respond(async () => ({ status: 403, text: 'dummy-secret' }));
   await plugin.request(true);
@@ -208,7 +208,7 @@ test('legacy data loads and migrates only on write; unsupported storage blocks m
   h.seed({ version: 1, frames: structuredClone(first.frames) });
   const plugin = h.create(); await plugin.onload();
   assert.equal((h.saved as any).version, 1);
-  await plugin.saveSettings(); assert.equal((h.saved as any).version, 2);
+  await plugin.saveSettings(); assert.equal((h.saved as any).version, 3);
   assert.equal(plugin.frames['test.md'].document.title, '테스트');
   h.seed({ version: 999, frames: {} });
   const bad = h.create(); await bad.onload();
@@ -256,7 +256,7 @@ test('restarted plugin shows unresolved request, requires explicit risk acknowle
   assert.equal(JSON.stringify(h.saved), acknowledged);
   h.respond(async request => {
     const blocks = JSON.parse(JSON.parse(request.body).contents[0].parts[0].text).blocks;
-    return { status: 200, text: JSON.stringify({ usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 10, totalTokenCount: 30 }, modelVersion: 'gemini-3.1-flash-lite', candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: [{ id: 'other', confidence: 0 }], type: { id: 'idea-note', confidence: 0 }, units: [{ blockIds: blocks.map((b: any) => b.id), labels: [{ id: 'idea', confidence: 0 }] }] }) }] } }] }) };
+    return { status: 200, text: JSON.stringify({ usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 10, totalTokenCount: 30 }, modelVersion: 'gemini-3.1-flash-lite', candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: [{ path: ['Other'], source: 'unclassified', confidence: 0 }], type: { id: 'idea-note', confidence: 0 }, units: [{ blockIds: blocks.map((b: any) => b.id), labels: [{ id: 'idea', confidence: 0 }] }] }) }] } }] }) };
   });
   await next.request(true);
   assert.equal(h.requests.length, 2); assert.equal(next.previews.size, 1);
@@ -286,8 +286,123 @@ test('new file at reused path can request while old HTTP is pending without old 
   finish({ status: 403, text: '' }); await pending;
   assert.equal(plugin.previewStatuses.has('test.md'), false);
   assert.equal(plugin.previewQueue.pending('test.md'), true);
-  h.respond(async () => ({ status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: [{ id: 'other', confidence: 0 }], type: { id: 'idea-note', confidence: 0 }, units: [{ blockIds: ['b1'], labels: [{ id: 'idea', confidence: 0 }] }] }) }] } }] }) }));
+  h.respond(async () => ({ status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: [{ path: ['Other'], source: 'unclassified', confidence: 0 }], type: { id: 'idea-note', confidence: 0 }, units: [{ blockIds: ['b1'], labels: [{ id: 'idea', confidence: 0 }] }] }) }] } }] }) }));
   await plugin.tick();
   assert.equal(plugin.previews.get('test.md').sourceText, '새 파일');
   assert.equal(h.requests.length, 2);
+});
+
+// UI 모형의 details 하위는 기본 화면 검사에서 제외하여 개발 정보 노출을 검증한다.
+const descendants = (el: any, includeDetails = true): any[] => [el, ...(el.tag === 'details' && !includeDetails ? [] : el.children.flatMap((child: any) => descendants(child, includeDetails)))];
+const jsonCopy = (value: unknown) => JSON.parse(JSON.stringify(value));
+function domainResponder(domains: unknown[]) {
+  return async (request: HttpRequest): Promise<HttpResponse> => {
+    const input = JSON.parse(JSON.parse(request.body).contents[0].parts[0].text);
+    return { status: 200, text: JSON.stringify({ modelVersion: 'gemini-3.1-flash-lite-001', candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains, type: { id: 'informational', confidence: 0.83 }, units: [{ blockIds: input.blocks.map((b: any) => b.id), labels: [{ id: 'claim', confidence: 0.72 }, { id: 'evidence', confidence: 0.64 }] }] }) }] } }] }) };
+  };
+}
+const economicsCandidate = [{ path: ['Economics'], source: 'new', confidence: 0.91 }];
+
+test('AC-B/C/F/G: structured review approves only the chosen candidate and reuses it after restart', async () => {
+  const h = harness(); const plugin = h.create(); await plugin.onload(); plugin.key.save('key'); h.advance(60_000);
+  await plugin.request();
+  const original = h.content; const frames = JSON.stringify((h.saved as any).frames);
+  h.respond(domainResponder([...economicsCandidate, { path: ['Science', 'Biology', 'Genetics'], source: 'new', confidence: 0.9 }]));
+  await plugin.request(true);
+  const preview = plugin.previews.get(h.file.path);
+  assert.deepEqual(jsonCopy(plugin.store.getDomains()), []);
+  plugin.showPreview(h.file.path);
+  const modal = h.modals.at(-1);
+  const visible = descendants(modal.contentEl, false).map(el => el.text).join('\n');
+  for (const text of ['Domain', 'Economics', 'Science → Biology → Genetics', '새 Domain 후보', 'Document Type', 'informational', 'Knowledge Units', 'Unit 1 · 1~2행', 'claim · evidence', original]) assert.ok(visible.includes(text), text);
+  for (const text of ['confidence', '0.91', '0.83', preview.frame.evaluation.runId, 'gemini-3.1-flash-lite-001', 'classification-v2', 'schemaVersion']) assert.ok(!visible.includes(text), text);
+  const details = descendants(modal.contentEl).find(el => el.tag === 'details');
+  assert.equal(details.open, false);
+  const developer = descendants(details).map(el => el.text).join('\n');
+  for (const text of ['Developer Details', 'confidence', '0.91', preview.frame.evaluation.runId, 'gemini-3.1-flash-lite-001', 'classification-v2', 'classification-schema-v2', 'domainCatalogHash']) assert.ok(developer.includes(text), text);
+  const approve = descendants(modal.contentEl).find(el => el.text === '승인');
+  approve.onclick();
+  await waitFor(() => plugin.store.getDomains().length === 1);
+  assert.deepEqual(jsonCopy(plugin.store.getDomains()), [{ path: ['Economics'] }]);
+  assert.equal(preview.frame.document.domains[0].source, 'new', 'approval must not rewrite AI provenance');
+  assert.equal(JSON.stringify((h.saved as any).frames), frames); assert.equal(h.content, original);
+  plugin.onunload();
+  const next = h.create(); await next.onload();
+  assert.equal(next.previews.size, 0);
+  h.respond(domainResponder([{ path: ['Economics'], source: 'existing', confidence: 0.91 }]));
+  await next.request(true);
+  const sent = JSON.parse(JSON.parse(h.requests.at(-1)!.body).contents[0].parts[0].text);
+  assert.deepEqual(sent.existingDomains, [{ path: ['Economics'] }]);
+  assert.equal(next.previews.get(h.file.path).frame.document.domains[0].source, 'existing');
+  next.showPreview(h.file.path);
+  assert.ok(descendants(h.modals.at(-1).contentEl, false).some(el => el.text === '기존 Domain 재사용'));
+  assert.equal(JSON.stringify((h.saved as any).frames), frames);
+});
+
+test('AC-D: rejection or no approval never enters subsequent requests or persisted Catalog', async () => {
+  for (const reject of [false, true]) {
+    const h = harness(); const plugin = h.create(); await plugin.onload(); plugin.key.save('key'); h.advance(60_000);
+    h.respond(domainResponder(economicsCandidate)); await plugin.request(true);
+    const preview = plugin.previews.get(h.file.path);
+    if (reject) {
+      plugin.showPreview(h.file.path);
+      descendants(h.modals.at(-1).contentEl).find(el => el.text === '거절').onclick();
+      await waitFor(() => Object.values(preview.domainReviews).includes('rejected'));
+      await assert.rejects(plugin.reviewDomain(preview, 0, true));
+    }
+    await plugin.request(true);
+    const sent = JSON.parse(JSON.parse(h.requests.at(-1)!.body).contents[0].parts[0].text);
+    assert.deepEqual(sent.existingDomains, []); assert.deepEqual((h.saved as any).domains, []);
+    assert.equal(h.requests.length, 2, 'review must not make an extra model call');
+  }
+});
+
+test('approval failure stays unapproved, shows retry, and successful retry persists once', async () => {
+  const h = harness(); const plugin = h.create(); await plugin.onload(); plugin.key.save('key'); h.advance(60_000);
+  h.respond(domainResponder(economicsCandidate)); await plugin.request(true); plugin.showPreview(h.file.path);
+  const modal = h.modals.at(-1); h.failSave();
+  descendants(modal.contentEl).find(el => el.text === '승인').onclick();
+  await waitFor(() => descendants(modal.contentEl).some(el => el.text.includes('완료하지 못했습니다')));
+  assert.deepEqual(jsonCopy(plugin.store.getDomains()), []);
+  assert.deepEqual(jsonCopy(plugin.previews.get(h.file.path).domainReviews), {});
+  h.recoverSave(); descendants(modal.contentEl).find(el => el.text === '승인').onclick();
+  await waitFor(() => plugin.store.getDomains().length === 1);
+  assert.deepEqual((h.saved as any).domains, [{ path: ['Economics'] }]);
+  assert.equal(h.requests.length, 1);
+});
+
+test('stale preview approval is blocked after replacement, deletion, rename or unload', async () => {
+  for (const action of ['replace', 'delete', 'rename', 'unload']) {
+    const h = harness(); const plugin = h.create(); await plugin.onload(); plugin.key.save('key'); h.advance(60_000);
+    h.respond(domainResponder(economicsCandidate)); await plugin.request(true);
+    const preview = plugin.previews.get(h.file.path);
+    if (action === 'replace') await plugin.request(true);
+    if (action === 'delete') h.vaultEvents.delete(h.file);
+    if (action === 'rename') { const old = h.file.path; h.file.path = 'new.md'; h.vaultEvents.rename(h.file, old); }
+    if (action === 'unload') plugin.onunload();
+    await assert.rejects(plugin.reviewDomain(preview, 0, true));
+    assert.deepEqual(jsonCopy(plugin.store.getDomains()), []);
+  }
+});
+
+test('invented existing domain cannot replace a valid preview and does not register a candidate', async () => {
+  const h = harness(); const plugin = h.create(); await plugin.onload(); plugin.key.save('key'); h.advance(60_000);
+  h.respond(domainResponder(economicsCandidate)); await plugin.request(true);
+  const before = plugin.previews.get(h.file.path);
+  h.respond(domainResponder([{ path: ['Behavioral Economics'], source: 'existing', confidence: 0.9 }]));
+  await plugin.request(true);
+  assert.equal(plugin.previews.get(h.file.path), before);
+  assert.match(plugin.previewStatuses.get(h.file.path), /검증 실패/);
+  assert.deepEqual(jsonCopy(plugin.store.getDomains()), []);
+});
+
+test('duplicate review clicks cannot race approval with rejection or duplicate Catalog entries', async () => {
+  const h = harness(); const plugin = h.create(); await plugin.onload(); plugin.key.save('key'); h.advance(60_000);
+  h.respond(domainResponder(economicsCandidate)); await plugin.request(true);
+  const preview = plugin.previews.get(h.file.path);
+  const saving = plugin.reviewDomain(preview, 0, true);
+  await assert.rejects(plugin.reviewDomain(preview, 0, false));
+  await saving;
+  await assert.rejects(plugin.reviewDomain(preview, 0, true));
+  assert.deepEqual((h.saved as any).domains, [{ path: ['Economics'] }]);
 });

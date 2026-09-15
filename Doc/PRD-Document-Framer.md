@@ -1,5 +1,5 @@
 > **Status:** Draft / Specification  
-> **Version:** 0.4  
+> **Version:** 0.5
 > **Project:** Document Framer  
 > **Timebox:** 10 days  
 > **Workflow Stage:** Step 2 — Specify Observable Behavior
@@ -151,7 +151,7 @@ MVP에서는 다음 기능을 제공하지 않는다.
 
 Domain은 하나 이상 존재할 수 있다.
 
-Domain은 최대 3단계 hierarchy를 표현할 수 있어야 한다.
+Domain은 최대 3단계 hierarchy를 표현할 수 있어야 한다. 승인 Catalog를 먼저 검토하고 합리적으로 맞는 기존 경로를 재사용하며, 부족한 경우에만 신규 후보를 제안한다.
 
 예:
 
@@ -228,27 +228,15 @@ Reframing이 수행되더라도 사용자가 직접 입력하거나 수정한 �
 
 ---
 
-## S-06 — Unknown Domain Fallback
+## S-06 — Domain Candidate Review
 
-AI가 Document를 기존 Domain Taxonomy의 어떤 Domain에도 적절하게 분류할 수 없다고 판단할 수 있다.
+기존 ID S-06을 유지하며 **Domain Candidate Review**로 정책을 변경한다(2026-09-15 사용자 결정).
 
-이 경우 시스템은 해당 Document를 `기타(Other)` Domain으로 분류한다.
-
-```text
-Document
-    ↓
-Domain Classification
-    ↓
-Known Domain? ── Yes → Existing Domain
-    │
-    No
-    ↓
-기타 (Other)
-```
-
-MVP에서는 AI가 새로운 Domain을 생성하거나 Domain Taxonomy를 자동으로 확장하지 않는다.
-
-`기타`로 분류된 Document는 이후 사용자가 확인하고 필요한 경우 classification을 수정할 수 있다.
+1. 승인된 Domain Catalog에서 문서를 합리적으로 표현하는 분야를 우선 재사용한다.
+2. 적절한 분야가 없을 때만 다른 문서에도 재사용할 수 있는 안정적인 새 후보를 제안한다. 비슷한 의미의 불필요한 세분화는 피한다.
+3. 새 후보는 미리보기에서 승인·거절할 수 있으며 미응답도 다른 문서 처리를 막지 않는다.
+4. 명시적으로 승인하고 저장에 성공한 후보만 Catalog에 추가되어 이후 요청에 전달된다. 거절·미승인 후보는 전달하지 않는다.
+5. 문서 자체의 의미로 분야를 판단할 수 없을 때만 Other를 사용한다. Catalog가 비어 있거나 적합한 기존 분야가 없다는 이유로 Other를 사용하지 않는다.
 
 ---
 
@@ -325,7 +313,7 @@ Reframing은 Raw Markdown을 수정하지 않는다.
 
 시스템은 Document에 하나 이상의 Domain을 할당할 수 있어야 한다.
 
-Domain은 최대 3단계 hierarchy를 표현할 수 있어야 한다.
+Domain은 최대 3단계 hierarchy를 표현할 수 있어야 한다. 승인 Catalog를 먼저 검토하고 합리적으로 맞는 기존 경로를 재사용하며, 부족한 경우에만 신규 후보를 제안한다.
 
 ---
 
@@ -416,7 +404,7 @@ Frame은 최소한 다음 개념을 표현할 수 있어야 한다.
 
 사용자는 처리된 Document의 Frame을 확인할 수 있어야 한다.
 
-MVP에서는 Frame을 확인할 수 있는 최소 인터페이스만 요구하며 특정 UI 형태를 요구하지 않는다.
+Gemini 기본 검토 화면은 Domain 경로·기존/신규 여부·Document Type·Knowledge Unit 경계·Semantic Label·해당 원문을 구조화하여 표시한다. 신규 후보에는 승인·거절을 제공한다. Raw JSON, confidence, run ID, 모델과 평가 버전 정보는 기본으로 접힌 Developer Details에서 확인한다. confidence는 모델의 자기 평가이며 정확도 확률로 안내하지 않는다.
 
 ---
 
@@ -439,13 +427,17 @@ MVP에서는 Frame을 확인할 수 있는 최소 인터페이스만 요구하�
 사용자가 직접 수정한 값은 AI-generated annotation과 구분되어야 한다.
 
 ---
-## FR-15 — Unknown Domain Fallback
+## FR-15 — Domain Reuse and Candidate Approval
 
-시스템이 Document를 기존 Domain Taxonomy의 어떤 Domain에도 적절하게 분류할 수 없는 경우 해당 Document를 `기타(Other)` Domain으로 분류할 수 있어야 한다.
+기존 ID FR-15의 새 이름은 **Domain Reuse and Candidate Approval**이다.
 
-MVP에서는 AI가 새로운 Domain을 생성하거나 기존 Domain Taxonomy를 자동으로 확장하지 않는다.
+AI는 승인 Catalog를 입력받아 기존 분야를 우선 재사용하고, 충분히 표현할 수 없을 때만 재사용 가능한 새 Domain 후보를 제안해야 한다. 최대 3단계 경로와 multi-domain을 유지한다.
 
-`기타`로 분류된 Document는 이후 사용자가 확인할 수 있어야 한다.
+신규 후보는 명시적 사용자 승인 및 저장 성공 전에는 Catalog에 등록하지 않는다. 거절과 미응답은 등록하지 않으며 다른 문서 처리를 막지 않는다. 승인은 활성 Frame publication이나 전체 Human Correction을 의미하지 않는다.
+
+existing 응답은 요청 당시 실제 Catalog와 일치해야 한다. 빈 값·비정상 길이·중복·잘못된 계층·잘못된 출처는 로컬 검증에서 거부하고 정상 미리보기로 공개하지 않는다. 응답을 조용히 수정하여 정상 결과로 취급하지 않는다.
+
+Other는 의미적으로 분야 판단이 어려운 문서에만 사용하는 분류 불가 표시이며 승인 대상 Catalog 항목이 아니다. API/검증 실패를 Other로 대체하지 않는다.
 
 ---
 
@@ -589,7 +581,7 @@ Reframing이 수행되더라도 이러한 Human-authored 정보가 의도치 않
 
 **Given** 하나의 문서가 둘 이상의 분야와 실질적으로 관련될 때  
 **When** Domain Classification을 수행하면  
-**Then** Frame은 하나 이상의 Domain을 동시에 표현할 수 있다.
+**Then** Frame은 하나 이상의 Domain을 동시에 표현할 수 있으며 기존 분야와 신규 후보의 출처를 각각 구분한다.
 
 ---
 
@@ -597,7 +589,7 @@ Reframing이 수행되더라도 이러한 Human-authored 정보가 의도치 않
 
 **Given** 하위 분야가 존재하는 Domain이 있을 때  
 **When** 해당 Domain을 Frame에 기록하면  
-**Then** 최대 3단계의 Domain 관계를 표현할 수 있다.
+**Then** 기존 분야와 신규 후보 모두 1~3단계 경로로 표현할 수 있다. 4단계 이상과 비어 있는 경로는 거부한다.
 
 ---
 
@@ -651,13 +643,16 @@ Reframing이 수행되더라도 이러한 Human-authored 정보가 의도치 않
 
 ---
 
-## AC-12 — Unknown Domain Fallback
+## AC-12 — Domain Reuse / Candidate Review
 
-**Given** Document가 기존 Domain Taxonomy의 어떤 Domain에도 적절하게 해당하지 않을 때  
-**When** Domain Classification을 수행하면  
-**Then** 시스템은 해당 Document를 `기타(Other)`로 표현할 수 있다.
+기존 ID AC-12를 **Domain Reuse / Candidate Review** 검증에 사용한다.
 
-이 과정에서 새로운 Domain을 자동으로 생성하거나 사용자에게 taxonomy 확장을 요구하지 않는다.
+- Catalog에 Economics가 있으면 행동경제학 문서에 기존 Economics를 합리적으로 재사용할 수 있다. 불필요한 세분화를 피하는 의미 품질은 실제 문서 평가로 확인한다.
+- 적합한 기존 분야가 없으면 새 후보를 표시할 수 있지만 자동 등록하지 않는다.
+- 승인·저장 성공 후 재시작해도 Catalog가 유지되고 다음 요청의 existingDomains에 포함된다.
+- 거절·미응답·저장 실패 후보는 이후 입력에 포함하지 않는다. 다른 문서 검토는 계속할 수 있다.
+- Catalog에 없는 경로를 existing으로 반환하면 검증에 실패하며 기존 정상 결과를 보호한다.
+- Other는 문서 의미로 분야를 판단할 수 없을 때만 사용한다. 빈 Catalog의 일반적인 문서는 새 후보를 제안할 수 있다.
 
 ---
 
@@ -888,7 +883,7 @@ MVP의 AI classification은 사용자 결정(2026-09-15)에 따라 Gemini를 bas
 
 ### OD-01 — Domain Taxonomy v0.1
 
-실제 3단계 Domain 목록을 결정해야 한다.
+고정 Domain 목록은 사용하지 않고 빈 Catalog에서 사용자 승인으로 축적한다(결정 완료). multi-domain·최대 3단계는 유지한다. 의미상 유사 분야의 재사용 품질 기준, 동의어·다국어 표기와 장기 Catalog 관리 정책은 실제 평가 후 결정한다.
 
 ### OD-02 — Semantic Taxonomy v0.1
 
@@ -966,7 +961,7 @@ FR-19의 경계 동작은 검토용 해석이며, 이 항목의 구체적인 값
 - 원문을 수정하거나 유실시키는 방식으로 분석 실패를 복구하지 않는다.
 - 실패한 새 분석은 마지막 정상 Frame을 대체하지 않는다. 이전 Frame을 보여줄 때 최신 원문과 일치하지 않으면 그 사실을 표시한다.
 - AI annotation과 Human-authored 정보를 구분한다. **사용자 정보 보존과 현재 원문에 대한 적용 여부는 별개다.** 연결이 불확실한 정보는 보존하되 자동 적용하지 않는다.
-- `기타(Other)`는 Domain 분류의 정상 fallback이다. API 오류, 읽기 실패, 잘못된 분석 결과를 `기타`로 숨기지 않는다.
+- `기타(Other)`는 문서 의미를 판단할 수 없는 경우의 분류 불가 표시다. Catalog 부재의 fallback이 아니다. API 오류, 읽기 실패, 잘못된 분석 결과를 `기타`로 숨기지 않는다.
 - 완료, 처리 중, 사용자 응답 대기, 실패, 처리할 내용 없음 등을 사용자가 구분할 수 있어야 한다. 원문 최신성 및 연결 확인 필요 여부는 처리 상태와 함께 표현할 수 있다. 구체적인 상태명과 저장 형식은 Step 3에서 결정한다.
 - 사용자는 실패 대상, 실패 단계, 이해 가능한 사유, 재시도 또는 수정 필요 여부를 최소 인터페이스에서 확인할 수 있어야 한다. 별도 운영 대시보드는 요구하지 않는다.
 
@@ -989,9 +984,9 @@ FR-19의 경계 동작은 검토용 해석이며, 이 항목의 구체적인 값
 | --- | --- | --- | --- |
 | EF-01 | 모델 timeout, 일시적 네트워크 장애, 요청 제한 | 유한한 재시도 정책을 적용한다. 한도 소진 후 실패 또는 재시도 대기로 표시한다. 공통 서비스 장애 시 관련 분석 작업은 대기할 수 있으나 기존 Frame 조회와 사용자 정보 편집은 가능한 범위에서 유지한다. | FR-10~14, QR-01 / AC-17; OD-08 |
 | EF-02 | 인증 오류, 사용량·결제 한도 등 설정 변경이 필요한 오류 | 반복 자동 요청을 멈추고 필요한 설정 조치를 안내한다. 해결 후 재시도할 수 있다. 고비용 모델로 자동 전환하지 않는다. | QR-01, FR-18 / AC-17; OD-08 |
-| EF-03 | 응답 형식 오류, 필수 필드 누락, 허용되지 않은 label·confidence, 잘못된 source location | 검증 실패로 취급한다. 제한된 재시도 후에도 실패하면 완료 Frame으로 저장하지 않는다. 모델 응답의 임의 label을 taxonomy에 추가하지 않는다. | FR-04~10, FR-15 / AC-18 |
+| EF-03 | 응답 형식 오류, 필수 필드 누락, 허용되지 않은 label·confidence, 잘못된 source location | 검증 실패로 취급한다. 잘못된 응답은 완료 Frame으로 저장하지 않는다. 현재 Phase 2에서는 검증 실패의 자동 재시도나 보정 호출을 하지 않는다. 모델 응답의 임의 label을 taxonomy에 추가하지 않는다. | FR-04~10, FR-15 / AC-18 |
 | EF-04 | 일부 Knowledge Unit 분석만 성공 | 전체 Frame 완료로 표시하지 않는다. 기존 정상 Frame을 보존하며 재시도할 수 있게 한다. 중간 결과 공개·Unit 단위 재시작은 MVP 필수가 아니다. | FR-06~10 / AC-18, AC-24 |
-| EC-09 | 여러 의미가 섞이거나 분류 confidence가 낮음 | 허용 taxonomy 내 multi-label을 사용할 수 있으며 불확실성을 유지한다. 알려진 Domain이 없으면 `기타`로 처리한다. 낮은 confidence만으로 모든 문서를 Blocking하지 않고 OD-07의 조건을 적용한다. | FR-04~08, FR-15~17 / AC-07, AC-12; OD-10 |
+| EC-09 | 여러 의미가 섞이거나 분류 confidence가 낮음 | 허용 taxonomy 내 multi-label을 사용할 수 있으며 불확실성을 유지한다. 적합한 승인 Domain이 없으면 신규 후보를 제안하고, 문서 의미를 판단할 수 없을 때만 `기타`를 사용한다. 낮은 confidence만으로 모든 문서를 Blocking하지 않고 OD-07의 조건을 적용한다. | FR-04~08, FR-15~17 / AC-07, AC-12; OD-10 |
 
 ## 12.4 Human Information and Clarification
 
@@ -1016,7 +1011,7 @@ FR-19의 경계 동작은 검토용 해석이며, 이 항목의 구체적인 값
 
 v0.2는 예외 상황과 AC-16~27을 추가했다. v0.3은 사용자 결정에 따라 FR-19, AC-28~33, OD-11을 추가하고 S-01 및 AC-01을 실행 조건에 맞게 수정했다. FR-01~18은 유지한다. v0.4는 대기 상한 240초와 정상 완료 후 초기화를 FR-19·AC-31·OD-11에 반영했다. 모델·taxonomy·품질 기준·Clarification trigger 등 OD-01~07은 여전히 미결정이며, edge case 추가만으로 PRD 확정 또는 구현 준비 완료를 의미하지 않는다.
 
-첨부 Project Brief의 신규 Domain 후보 제안은 이 PRD의 FR-15와 다르다. 본 문서는 FR-15의 `기타` fallback과 taxonomy 자동 확장 제외를 기준으로 한다. Brief의 중요도 후보 척도보다 PRD의 1–10 점수 및 Unit Highlight ON/OFF를 따른다. AI Agent Dashboard의 Agent integration·Multi-Agent 기능은 Document Framer의 MVP 범위에 포함하지 않는다.
+v0.5는 2026-09-15 사용자 결정으로 Brief와의 Domain 충돌을 해소했다. S-06/FR-15/AC-12의 추적 ID를 유지하며 기존 분야 우선 재사용·신규 후보 제안·승인 후 등록으로 통일한다. 고정 Domain 목록 요구는 대체하지만 자동 등록 금지는 유지한다. Brief의 중요도 후보 척도보다 PRD의 1–10 점수 및 Unit Highlight ON/OFF를 따른다. AI Agent Dashboard의 Agent integration·Multi-Agent 기능은 Document Framer의 MVP 범위에 포함하지 않는다.
 
 Step 3에서는 OD-08~11 및 기존 Open Decisions를 해당 기능 구현 전에 해소한다. 관련 AC는 고정된 입력 문서, 모델 실패 응답, 저장 실패 및 원문 변경을 재현해 검증할 수 있어야 한다. 복잡한 자동 anchor 복구, Unit 병합 UI, 자동 백업 서비스, 운영 대시보드는 이번 추가 범위에 포함하지 않는다.
 
@@ -1029,3 +1024,10 @@ Step 3에서는 OD-08~11 및 기존 Open Decisions를 해당 기능 구현 전�
 | EC-17 | A와 B를 번갈아 수정 | 각 문서의 전환 신호와 안정 대기를 독립적으로 판정한다. 후보 문서를 다시 수정하면 기존 전환 신호를 해제한다. Framing 실행 후 정상 완료 전 재수정에만 다음 대기를 60초 늘리며 상한은 240초다. 최신 결과가 정상 완료되면 60초로 초기화한다. | FR-19 / AC-30~32 |
 | EC-18 | 마지막 문서 작성 후 그대로 종료 | 안정 대기만으로 자동 실행하지 않는다. 다른 문서 수정이 없으면 Framing 버튼 요청이 필요하다. 종료·재시작 시 요청 처리는 OD-11에서 확정한다. | FR-19 / AC-28~29 |
 | EC-19 | 외부 동기화 또는 일괄 파일 수정 | 사용자 문서 전환으로 확인되지 않은 파일 변경을 다른 문서 수정 시작으로 간주하지 않는다. 감지 방식은 OD-11에서 검증한다. | FR-19; OD-11 |
+
+## 12.8 Domain Candidate Review 경계
+
+- 기존 경로의 표기 변경·중복·존재하지 않는 existing은 오류다. 규칙은 Phase 2 revision의 정규화 계약을 따른다.
+- 승인 저장 실패는 성공으로 표시하지 않고 다시 승인할 수 있다. 동시 승인·Frame·설정·호출 기록 저장은 서로의 데이터를 보존한다.
+- 미리보기 교체·원문 삭제/이동·플러그인 종료 후 남은 창에서 후보 승인을 새로 시작하지 않는다.
+- 미승인·거절 상태는 이번 preview-only slice에서 메모리에만 유지한다. 재시작 후 후보는 사라지고 승인 Catalog만 보존된다. 이는 전체 Clarification persistence의 구현을 뜻하지 않는다.

@@ -9,7 +9,7 @@ import { sourceHash, GENERATION_CONFIG } from '../src/evaluation';
 
 const source = { path: 'evaluation/a.md', basename: 'a', ctime: 1, mtime: 2, text: '비민감 원문 😀\r\n두 번째 줄' };
 const usage = { promptTokenCount: 11, candidatesTokenCount: 7, totalTokenCount: 18, cachedContentTokenCount: 3, thoughtsTokenCount: 0 };
-const value = { domains: [{ id: 'other', confidence: 0.1 }], type: { id: 'idea-note', confidence: 0.5 }, units: [{ blockIds: ['b1'], labels: [{ id: 'idea', confidence: 0.5 }] }] };
+const value = { domains: [{ path: ['Other'], source: 'unclassified', confidence: 0.1 }], type: { id: 'idea-note', confidence: 0.5 }, units: [{ blockIds: ['b1'], labels: [{ id: 'idea', confidence: 0.5 }] }] };
 const response = (classification: unknown = value): HttpResponse => ({ status: 200, text: JSON.stringify({ usageMetadata: usage, modelVersion: 'gemini-3.1-flash-lite-001', candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(classification) }] } }] }) });
 const generate = (client: GeminiClient) => client.generate('dummy-secret', 'system', {}, {});
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -31,8 +31,8 @@ test('retries, connection and classification have independent attempt records an
   assert.equal(second.trace?.sourceHash, createHash('sha256').update(source.text, 'utf8').digest('hex'));
   assert.equal(second.trace?.runId, preview.frame.evaluation.runId);
   assert.equal(preview.frame.modelVersion, 'gemini-3.1-flash-lite-001');
-  assert.equal(second.trace?.promptVersion, 'classification-v1');
-  assert.equal(second.trace?.taxonomyVersion, 'draft-0.1');
+  assert.equal(second.trace?.promptVersion, 'classification-v2');
+  assert.equal(second.trace?.taxonomyVersion, 'domain-policy-v1/type-label-draft-0.1');
   assert.equal(second.trace?.segmenterVersion, 'markdown-blocks-v1');
   assert.deepEqual(second.trace?.generationConfig, GENERATION_CONFIG);
   assert.ok(second.durationMs !== null && second.durationMs >= 0);

@@ -10,6 +10,7 @@ import { FramerSettingsTab } from './settings';
 import { GeminiClient, GeminiError } from './gemini';
 import { GeminiFramer, Preview } from './framing';
 import { AttemptJournal, attemptSummary } from './attempts';
+import { domainKey } from './domains';
 const VIEW = 'document-framer-view';
 // 비동기 작업이 시작한 파일 객체와 경로 세대를 기억한다. 같은 경로에 새 파일이 생겨도 구별한다.
 interface SourceTicket { path: string; file: TFile; generation: number }
@@ -19,6 +20,7 @@ export default class DocumentFramer extends Plugin {
   previewQueue = new ManualQueue();
   previews = new Map<string, Preview>();
   previewStatuses = new Map<string, string>();
+  private reviewingDomains = new Set<string>();
   private generations = new Map<string, number>();
   store = new FrameStore(data => this.saveData(data));
   journal = new AttemptJournal(attempts => {
@@ -151,7 +153,7 @@ export default class DocumentFramer extends Plugin {
           }
           this.previewStatuses.set(path, 'Gemini 분류 중…'); this.refresh();
           this.ensureGeminiReady();
-          const preview = await this.framer.generate({ path, basename: file.basename, ctime: file.stat.ctime, mtime: file.stat.mtime, text }, this.key.read() ?? '', 'classification', () => this.valid(ticket));
+          const preview = await this.framer.generate({ path, basename: file.basename, ctime: file.stat.ctime, mtime: file.stat.mtime, text }, this.key.read() ?? '', this.store.getDomains(), 'classification', () => this.valid(ticket));
           if (!this.valid(ticket)) continue;
           // 검증된 결과만 메모리에 게시한다. 저장된 로컬 Frame은 이 경로에서 갱신하지 않는다.
           this.previews.set(path, preview);
@@ -168,7 +170,7 @@ export default class DocumentFramer extends Plugin {
     await this.store.saveSettings();
   }
   async checkConnection() {
-    try { this.ensureGeminiReady(); await this.framer.checkConnection(this.key.read() ?? ''); }
+    try { this.ensureGeminiReady(); await this.framer.checkConnection(this.key.read() ?? '', this.store.getDomains()); }
     catch (error) {
       if (error instanceof GeminiError) throw error;
       throw new Error('연결 응답 검증 또는 비밀 저장소 확인에 실패했습니다.');
@@ -185,9 +187,24 @@ export default class DocumentFramer extends Plugin {
     await this.journal.acknowledgeUnresolved();
   }
   showAttempts() { new AttemptModal(this.app, this).open(); }
+  // 승인 범위는 현재 미리보기의 새 후보 한 개다. 원래 AI 결과와 활성 Frame은 수정하지 않는다.
+  async reviewDomain(preview: Preview, index: number, approve: boolean) {
+    const domain = preview.frame.document.domains[index];
+    if (this.stopped || this.storageError || this.previews.get(preview.frame.document.path) !== preview
+      || !domain || domain.source !== 'new') throw new Error('현재 미리보기에서 후보를 다시 확인하세요.');
+    const key = domainKey(domain.path);
+    const reviewKey = `${preview.frame.evaluation.runId}:${key}`;
+    if (this.reviewingDomains.has(reviewKey)) throw new Error('후보 저장 중입니다.');
+    if (preview.domainReviews[key] || this.store.getDomains().some(item => domainKey(item.path) === key)) throw new Error('이미 검토되거나 저장된 후보입니다.');
+    this.reviewingDomains.add(reviewKey);
+    try {
+      if (approve) await this.store.saveDomain({ path: domain.path });
+      preview.domainReviews[key] = approve ? 'approved' : 'rejected';
+    } finally { this.reviewingDomains.delete(reviewKey); }
+  }
   showPreview(path: string) {
     const preview = this.previews.get(path);
-    if (preview) new PreviewModal(this.app, preview).open();
+    if (preview) new PreviewModal(this.app, this, preview).open();
   }
   refresh() { if (!this.stopped) this.app.workspace.getLeavesOfType(VIEW).forEach(leaf => (leaf.view as FrameView).render()); }
   // 이미 열린 패널을 재사용하고, 없으면 오른쪽 영역에 생성한다.
@@ -249,29 +266,62 @@ class FrameView extends ItemView {
     if (frame) {
       this.contentEl.createEl('h3', { text: '저장된 테스트 결과' });
       this.contentEl.createEl('p', { text: '요청 당시 결과입니다. 수정한 문서는 다시 Framing을 요청하세요.' });
-      this.contentEl.createEl('pre').createEl('code', { text: JSON.stringify(frame, null, 2) });
+      const details = this.contentEl.createEl('details');
+      details.createEl('summary', { text: 'Developer Details' });
+      details.createEl('pre').createEl('code', { text: JSON.stringify(frame, null, 2) });
     } else this.contentEl.createEl('p', { text: '저장된 Frame이 없습니다.' });
   }
 }
 
-// 요청 당시 원문 스냅샷에서 지식 단위별 범위를 잘라 보여주는 읽기 전용 창이다.
+// 요청 당시 원문과 분류를 보여주고 새 Domain 후보만 승인·거절하는 검토 창이다.
 class PreviewModal extends Modal {
-  constructor(app: DocumentFramer['app'], private preview: Preview) { super(app); }
-  onOpen() {
+  private message = '';
+  constructor(app: DocumentFramer['app'], private plugin: DocumentFramer, private preview: Preview) { super(app); }
+  onOpen() { this.render(); }
+  private render() {
+    this.contentEl.empty();
     this.contentEl.addClass('document-framer');
     const { frame, sourceText } = this.preview;
-    this.contentEl.createEl('h2', { text: 'Gemini Frame 미리보기' });
-    this.contentEl.createEl('p', { text: `${frame.document.path} · ${frame.generatedAt}` });
-    this.contentEl.createEl('p', { text: `실행 ID: ${frame.evaluation.runId} · 응답 모델: ${frame.modelVersion ?? '미확인'}` });
-    this.contentEl.createEl('p', { text: '요청 당시 원문 위치입니다. 현재 편집 내용과 다를 수 있습니다. taxonomy는 초안이며 confidence는 모델의 자기 평가입니다. 활성 Frame에 반영되지 않고 재시작하면 사라집니다.' });
-    this.contentEl.createEl('p', { text: `Domain: ${frame.document.domains.map(d => `${d.path.join(' → ')} (${d.confidence})`).join(', ')} · Type: ${frame.document.type.id} (${frame.document.type.confidence})` });
-    for (const unit of frame.knowledgeUnits) {
-      this.contentEl.createEl('h3', { text: `${unit.id} · ${unit.source.startLine}~${unit.source.endLine}행` });
-      this.contentEl.createEl('p', { text: unit.labels.map(a => `${a.id} (${a.confidence})`).join(', ') });
+    this.contentEl.createEl('h2', { text: 'Gemini Frame 검토' });
+    this.contentEl.createEl('p', { text: frame.document.path });
+    this.contentEl.createEl('p', { text: '요청 당시 원문 기준입니다. 현재 편집 내용과 다를 수 있습니다. 미리보기는 재시작하면 사라지며 승인한 Domain만 이후 분류에 사용됩니다.' });
+    this.contentEl.createEl('h3', { text: 'Domain' });
+    for (const [index, domain] of frame.document.domains.entries()) {
+      const row = this.contentEl.createEl('section');
+      row.createEl('p', { text: domain.path.join(' → ') });
+      const key = domainKey(domain.path);
+      const saved = this.plugin.store.getDomains().some(item => domainKey(item.path) === key);
+      const review = this.preview.domainReviews[key];
+      row.createEl('p', { text: domain.source === 'existing' ? '기존 Domain 재사용'
+        : domain.source === 'unclassified' ? '분야 판단 어려움'
+        : saved ? '새 Domain 후보 · 승인되어 Catalog에 저장됨'
+        : review === 'rejected' ? '새 Domain 후보 · 거절됨 (저장하지 않음)' : '새 Domain 후보' });
+      if (domain.source === 'new' && !saved && !review) {
+        const approve = row.createEl('button', { text: '승인' });
+        const reject = row.createEl('button', { text: '거절' });
+        const decide = async (approved: boolean) => {
+          approve.disabled = true; reject.disabled = true;
+          try { await this.plugin.reviewDomain(this.preview, index, approved); this.message = ''; }
+          catch { this.message = '후보 처리를 완료하지 못했습니다. 저장소와 현재 미리보기를 확인한 뒤 다시 시도하세요.'; }
+          this.render();
+        };
+        approve.onclick = () => { void decide(true); };
+        reject.onclick = () => { void decide(false); };
+      }
+    }
+    if (this.message) this.contentEl.createEl('p', { text: this.message, attr: { role: 'status' } });
+    this.contentEl.createEl('h3', { text: 'Document Type' });
+    this.contentEl.createEl('p', { text: frame.document.type.id });
+    this.contentEl.createEl('h3', { text: 'Knowledge Units' });
+    for (const [index, unit] of frame.knowledgeUnits.entries()) {
+      this.contentEl.createEl('h4', { text: `Unit ${index + 1} · ${unit.source.startLine}~${unit.source.endLine}행` });
+      this.contentEl.createEl('p', { text: unit.labels.map(a => a.id).join(' · ') });
       this.contentEl.createEl('pre').createEl('code', { text: sourceText.slice(unit.source.startOffset, unit.source.endOffset) });
     }
+    // 개발 정보는 기본으로 접는다. confidence는 원래 Frame 안에 보존한다.
     const details = this.contentEl.createEl('details');
-    details.createEl('summary', { text: 'Frame JSON' });
+    details.createEl('summary', { text: 'Developer Details' });
+    details.createEl('p', { text: 'confidence는 모델의 자기 평가이며 실제 정확도 확률이 아닙니다. model은 요청 모델, modelVersion은 응답 모델입니다.' });
     details.createEl('pre').createEl('code', { text: JSON.stringify(frame, null, 2) });
   }
   onClose() { this.contentEl.empty(); }

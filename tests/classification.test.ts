@@ -6,7 +6,7 @@ import { Classification, validateClassification } from '../src/classification';
 import { GeminiFramer, MAX_AI_BYTES, MAX_BLOCKS } from '../src/framing';
 import { GeminiClient, HttpRequest } from '../src/gemini';
 const valid = (ids = ['b1', 'b2']): Classification => ({
-  domains: [{ id: 'ai', confidence: 0.8 }, { id: 'business', confidence: 0.4 }],
+  domains: [{ path: ['Engineering', 'Computer Science', 'Artificial Intelligence'], source: 'new', confidence: 0.8 }, { path: ['Business'], source: 'new', confidence: 0.4 }],
   type: { id: 'prose-with-decision', confidence: 0.9 },
   units: [{ blockIds: ids, labels: [{ id: 'observation', confidence: 0.7 }, { id: 'decision', confidence: 0.9 }] }],
 });
@@ -34,7 +34,7 @@ test('empty, malformed Markdown and unclosed fences retain readable content with
 test('valid multi-domain, hierarchy IDs, multi-label and Other/unclassified accepted', () => {
   const blocks = extractBlocks('# 제목\n\n결정 내용');
   assert.deepEqual(validateClassification(valid(), blocks), valid());
-  const other = valid(); other.domains = [{ id: 'other', confidence: 0.1 }];
+  const other = valid(); other.domains = [{ path: ['Other'], source: 'unclassified', confidence: 0.1 }];
   other.type = { id: 'unclassified', confidence: 0 };
   other.units[0].labels = [{ id: 'unclassified', confidence: 0 }];
   assert.deepEqual(validateClassification(other, blocks), other);
@@ -46,7 +46,7 @@ test('schema rejects unknown taxonomy, extra fields, confidence errors and missi
     v => { v.domains[0].id = 'invented'; }, v => { v.type.id = 'summary'; }, v => { v.units[0].labels[0].id = 'new'; },
     v => { v.type.confidence = 1.1; }, v => { v.type.confidence = -0.1; }, v => { v.type.confidence = NaN; }, v => { v.type.confidence = '0.9'; },
     v => { v.units[0].labels = []; }, v => { v.domains = []; }, v => { v.domains.push(v.domains[0]); },
-    v => { v.domains.push({ id: 'other', confidence: 1 }); }, v => { v.units[0].labels.push({ id: 'unclassified', confidence: 0 }); },
+    v => { v.domains.push({ path: ['Other'], source: 'unclassified', confidence: 1 }); }, v => { v.units[0].labels.push({ id: 'unclassified', confidence: 0 }); },
     v => { v.metadata = { path: 'injected' }; }, v => { v.units[0].source = { startLine: 999 }; },
     v => { v.units[0].blockIds = ['b1']; }, v => { v.units[0].blockIds = ['b2', 'b1']; }, v => { v.units[0].blockIds = ['b1', 'b1']; },
     v => { v.units[0].blockIds = ['b1', 'b99']; }, v => { v.units = []; }, v => { delete v.type; },

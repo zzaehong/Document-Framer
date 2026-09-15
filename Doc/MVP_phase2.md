@@ -1,5 +1,7 @@
 # 2단계 구현 기록 · Gemini 분류 미리보기
 
+> 아래 최초 구현 기록의 고정 Domain·v2 저장·프롬프트 v1은 당시 상태다. 현재 정책은 문서 마지막의 Phase 2 revision을 따른다.
+
 2026-09-15. 요구사항 우선순위는 사용자 추가 결정 → PRD → MVP 계획이다. 이번 범위는 설정·저장 통합, 키 관리, 독립 통신, taxonomy/schema, 원문 블록 추출, 실제 분류의 별도 미리보기까지다. 활성 Frame 갱신·자동 실행·사용자 annotation 수정·질문·버전 비교/복구는 연결하지 않는다.
 
 ## 모델과 공식 API 확인
@@ -68,3 +70,41 @@ Domain/Label은 여러 개를 허용한다. 이번 초안은 Type별 Label 제�
 - 실제 Obsidian과 Gemini 계정 확인 순서는 [README](../README.md#gemini-미리보기-확인)에 있다. 자동 테스트에서는 외부 API를 호출하지 않았으며 실계정 성공을 주장하지 않는다.
 
 모델 변경 시 [Gemini 3 공식 안내](https://ai.google.dev/gemini-api/docs/generate-content/gemini-3)에 맞춰 `thinkingBudget` 대신 `thinkingLevel: minimal`을 사용하고 권장 temperature 1을 적용했다. `minimal`은 생각 토큰 0을 보장하지 않으며 사용량 기록은 계속 실제 응답값을 따른다.
+
+
+## Phase 2 revision / follow-up — Domain Catalog & Review (2026-09-15)
+
+### 확정 구현 계약
+
+- 사용자 prompt.md가 기존 고정 Domain/Other fallback 결정을 대체한다. PRD/Brief/Plan을 먼저 조정한 뒤 구현한다.
+- Domain 응답은 `{ path: string[], source: 'existing' | 'new' | 'unclassified', confidence: number }`. 경로는 1~3단계, 단계당 1~80 UTF-16 코드 단위. NFC·앞뒤 공백 없음·내부 공백 한 칸·제어/비표시 형식 문자 없음으로 제한한다. 비정규 표기를 조용히 고치지 않고 거부한다.
+- 동일성 키는 NFC 경로 각 요소의 locale-independent 소문자 표현이다. 대소문자만 다른 새 후보와 중복을 거부하며 existing은 저장된 정확한 경로 표기를 요구한다. 경로 내부 반복 단계도 거부한다. 동의어/번역/의미상 상하 관계 판정은 모델과 사용자 검토의 책임이다.
+- Other는 `path: ['Other'], source: 'unclassified'` 단독으로만 허용한다. 의미 판단 불가 표시로 예약하며 Catalog 등록 대상이 아니다. new/existing과 혼합하지 않는다.
+- data.json v3: 기존 settings/frames/attempts와 `domains: {path: string[]}[]`. 빈 Catalog로 시작하고 승인된 전체 경로만 추가한다. 상위 경로를 별도 항목으로 자동 생성하지 않는다. v1/v2는 빈 Catalog와 함께 복원하고 첫 저장에서 v3로 이전한다. 기존 Frame과 과거 시도는 재분류·변형하지 않는다.
+- Catalog는 이번 slice에서 추가만 가능하다. 프레이머는 요청 시작 시 복사한 Catalog를 입력과 응답 검증에 동일하게 사용한다. 연결 검사도 승인 Catalog를 사용한다.
+- `classification-v2`, `classification-schema-v2`, `domain-policy-v1/type-label-draft-0.1`로 버전 의미를 구분한다. taxonomyVersion은 고정 Domain 목록이 아니라 Domain 규칙과 Type/Label 초안의 버전이다.
+- Evaluation Trace는 `domainCatalogHash`(JSON 경로 배열 스냅샷의 SHA-256), `domainCatalogCount`, `domainCatalogEncoding: catalog-json-v1`을 기록한다. 추가 순서를 유지하므로 현재 Catalog의 첫 count개와 해시로 과거 입력을 재구성·검증할 수 있다. 외부 편집/삭제 시 재구성을 보장하지 않는다. 전체 Catalog를 매 Attempt에 복제하지 않는다. 과거 v1 trace는 그대로 보존한다.
+- 후보는 미리보기에서 명시적으로 승인/거절한다. 승인 저장 성공만 Catalog에 반영하며 실패 시 재시도할 수 있다. 거절/미응답은 메모리 상태이고 재시작하면 사라진다. 승인으로 원래 AI 출처나 confidence를 바꾸지 않으며 활성 Frame을 게시하지 않는다.
+- 교체/삭제/이동/종료된 미리보기의 새 승인 요청은 거부한다. 여러 창/동시 승인 시 동일 경로는 한 항목으로 저장한다.
+- Review는 분야·출처·Type·Unit/행 범위·Label·원문을 표시한다. JSON·confidence·모델·run ID·평가 버전은 닫힌 Developer Details 안에 둔다. Attempt Journal 화면은 유지한다.
+
+### 유지 범위와 미결정 사항
+
+원문 Source of Truth, derived Frame, multi-domain/3단계, Type/Label/블록 위치, 64 KiB·128블록, 호출 제한·retry·timeout·Attempt Journal·SecretStorage, temperature 1·thinking minimal을 유지한다. 전체 Human Correction, 활성 Frame publication, Reframing, 자동 실행은 구현하지 않는다.
+
+실제 재사용 품질과 신규 분야 세분화 억제의 합격 기준, 동의어·다국어 표기, Catalog가 커질 때 입력 비용 정책은 Open Decision이다. 테스트용 모델 응답은 실제 Gemini 분류 품질을 증명하지 않는다.
+
+Change Candidates (이번 구현 제외): 사용자 Catalog 이름 변경/삭제와 과거 스냅샷 보존 정책, 거절 후보의 세션 간 보존·재제안 제어. 자동 병합·embedding·추가 LLM 정제 호출은 추가하지 않는다.
+
+
+### Revision 검증 및 reconciliation 결과
+
+- `npm run build`: TypeScript 검사와 CommonJS 번들 생성 성공.
+- `npm test`: **49 passed, 0 failed**. 기존 37개 테스트의 계약/표시 기대값을 갱신하고 12개 테스트를 추가했다. 샌드박스의 tsx IPC 소켓 제한으로 테스트는 승인된 제한 밖 실행을 사용했다.
+- `git diff --check`: 통과.
+- AC-A/B: 기존 경로 수용·신규 3단계/multi-domain·프롬프트 재사용 지침을 오프라인 검증했다. Economics/행동경제학의 실제 의미 품질은 README 수동 평가 절차로 남긴다.
+- AC-C/D: UI 승인 → v3 저장 → 재시작 → 다음 입력 전달, 거절·미응답 제외를 검증했다.
+- AC-E: 허위 existing, 표기/정규화/계층/중복/예약값 오류를 거부하고 이전 미리보기를 유지한다.
+- AC-F/G: 기본 화면의 Domain·출처·Type·Unit·Label·원문과 닫힌 Developer Details의 confidence/JSON/평가 정보 분리를 UI 모형으로 검증했다.
+- AC-H: 원문 위치·retry/timeout·usage journal·SecretStorage·파일 세대 무효화 회귀가 통과했다. transport/Attempt Journal/블록 추출기와 generation configuration은 유지했다.
+- PRD 0.5, Brief, MVP Plan, README를 현재 구현과 대조했다. 이 문서 앞부분은 기존 구현 이력으로 보존했다. 실제 Obsidian 화면 수동 검수와 실제 Gemini 호출은 이번 작업에서 실행하지 않았다.

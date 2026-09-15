@@ -15,7 +15,11 @@ export interface EvaluationTrace {
   promptVersion: string;
   taxonomyVersion: string;
   segmenterVersion: string;
-  responseSchemaVersion: 'classification-schema-v1';
+  responseSchemaVersion: 'classification-schema-v1' | 'classification-schema-v2';
+  // 과거 v1 trace에는 없다. 추가 전용 Catalog의 prefix를 해시로 검증하여 재구성한다.
+  domainCatalogHash?: string;
+  domainCatalogCount?: number;
+  domainCatalogEncoding?: 'catalog-json-v1';
   generationConfig: typeof GENERATION_CONFIG;
 }
 // 줄바꿈·공백을 정규화하지 않은 UTF-8 원문으로 SHA-256을 계산하고 16진수 문자열로 표현한다.

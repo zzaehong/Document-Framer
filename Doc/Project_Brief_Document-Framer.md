@@ -433,7 +433,7 @@ Cheap / Local Model
 
 강력한 reasoning model을 ingestion의 기본 경로에 포함하지 않는다.
 
-어떤 모델을 사용할지는 현재 결정하지 않는다.
+모델 baseline은 이후 사용자 결정에 따라 Gemini로 확정했으며, 품질·비용의 적합성은 실제 평가로 검증한다.
 
 ---
 
@@ -541,7 +541,7 @@ Preserved Content   Framing Pipeline
 
 최상위 분류에서 시작하되, 중위 분류를 거쳐, 하위 분류까지 연결되는 3단계 계층을 활용한다.
 
-taxonomy에 없는 새로운 분야일 경우, 새로운 이름을 붙이고, 사용자의 확인을 받는다. 이때, 사용자 확인은 Non-blocking 방식으로 진행한다.
+승인된 Domain Catalog를 먼저 검토하여 적절한 기존 분야를 우선 재사용한다. 비슷한 분야를 불필요하게 세분화하지 않고 기존 분야로 충분히 표현할 수 없을 때만 재사용 가능한 새 후보를 제안한다. 사용자 확인은 Non-blocking이며 승인·저장 성공한 후보만 Catalog에 추가한다. 거절·미응답 후보는 저장하거나 이후 Existing Domain으로 보내지 않는다. Other는 문서 의미 자체를 판단하기 어려울 때만 사용하며 Catalog 부재의 fallback이 아니다. multi-domain과 최대 3단계 경로를 유지한다.
 
 ---
 
@@ -594,7 +594,7 @@ Semantic classification은 먼저 문서의 성격을 상위 수준에서 분류
 
 ## 7.4 Classification Model
 
-MVP의 기본 Classification Model로 ChatGPT의 저비용 모델을 사용한다.
+2026-09-15 사용자 결정에 따라 Gemini를 baseline으로 사용하며 현재 기본 모델은 gemini-3.1-flash-lite다.
 
 Classifier Spike에서는 해당 모델을 baseline으로 사용하여
 Document Framer에 필요한 Domain / Document Type / Semantic Label
@@ -611,7 +611,7 @@ classification 품질을 검증한다.
 baseline이 MVP에 필요한 수준을 충족하지 못할 경우에만
 다른 저비용 또는 로컬 모델을 비교 후보로 추가한다.
 
-따라서 MVP의 기본 방향은 ChatGPT 저비용 모델이지만,
+따라서 MVP의 기본 방향은 Gemini baseline이지만,
 특정 모델에 대한 장기적인 종속을 제품 요구사항으로 두지는 않는다.
 
 ---
@@ -813,7 +813,7 @@ Spike의 목적은 구현이 아니라 불확실성을 제거하는 것이다.
 - Semantic classification은 Document Type → Semantic Label의 계층 구조를 기본 방향으로 한다.
 - Document를 ingestion 및 상위 classification 단위로 사용한다.
 - Document 내부는 Knowledge Unit으로 분할하여 Semantic Classification한다.
-- MVP Classification Model의 baseline은 ChatGPT 저비용 모델이다.
+- MVP Classification Model의 baseline은 Gemini다.
 - Document Importance는 1–10 점수로 표현한다.
 - Knowledge Unit의 중요성은 Highlight on/off로 표현한다.
 
@@ -847,13 +847,13 @@ Classifier Spike에서 검증한다.
 
 ## Open Decisions
 
-1. Domain Taxonomy v0.1의 실제 분류 항목
+1. 승인 Catalog의 의미상 재사용 품질·동의어/다국어·장기 관리 정책
 2. Semantic Label Taxonomy v0.1의 실제 하위 Label
 3. Knowledge Unit segmentation 방식
 4. Frame persistence 방식
 5. Clarification trigger의 구체적인 조건
 6. Classification success threshold
-7. MVP에 사용할 구체적인 ChatGPT 저비용 모델
+7. Gemini baseline의 실제 분류 품질 합격 기준
 
 ---
 
@@ -864,3 +864,7 @@ Classifier Spike에서 검증한다.
 Taxonomy, 모델, 저장 기술 등의 세부 사항은 이후 specification 또는 technical design에서 결정하거나 spike를 통해 검증할 수 있다.
 
 따라서 다음 단계에서는 구현 방법을 선택하기 전에 Document Framer의 사용자 및 시스템 행동을 `FR-xx`와 `AC-xx` 단위로 정의한다.
+
+## 2026-09-15 Domain / Review 결정 반영
+
+PRD S-02/S-06, FR-04/FR-11/FR-15, AC-04/AC-05/AC-12와 동일한 정책을 따른다. 기본 검토는 Domain·출처·Type·Unit 경계·Label·원문 중심이며 confidence와 JSON/평가 정보는 접힌 Developer Details에 둔다. Phase 2는 후보 승인 Catalog 저장만 추가하고 활성 Frame publication·전체 사용자 수정·Reframing·자동 실행은 후속 단계로 유지한다.
