@@ -878,7 +878,7 @@ AI-generated annotation은 특정 taxonomy 또는 특정 모델의 결과를 영
 
 ## Dependencies
 
-MVP의 AI classification은 저비용 ChatGPT 모델을 baseline으로 검증한다.
+MVP의 AI classification은 사용자 결정(2026-09-15)에 따라 Gemini를 baseline으로 검증한다. 기본 후보는 `gemini-3.1-flash-lite`이며 공식 문서의 지원 여부를 확인했다. 이번 구현은 실제 결과의 별도 미리보기까지다. [2단계 구현 기록](MVP_phase2.md)을 참고한다.
 
 최종 모델 선택은 Classifier Spike 결과에 따라 확정한다.
 
@@ -900,7 +900,7 @@ Knowledge Unit을 어떤 방식으로 생성할지 결정해야 한다.
 
 ### OD-04 — Classification Model
 
-MVP에서 사용할 구체적인 저비용 ChatGPT 모델을 결정해야 한다.
+사용자 결정(2026-09-15): Gemini를 사용하고 기본 후보는 `gemini-3.1-flash-lite`로 한다. 다른 모델로 자동 전환하지 않는다. 최종 품질 적합성은 실제 분류 실험으로 검증해야 한다.
 
 ### OD-05 — Classification Success Threshold
 

@@ -6,5 +6,5 @@
     "test": "tsx --test tests/*.test.ts",
     "test:vault": "npm run build && node scripts/test-vault.mjs"
   },
-  "devDependencies": { "@types/node": "^24.0.0", "esbuild": "^0.25.0", "obsidian": "^1.8.7", "tsx": "^4.20.0", "typescript": "^5.9.0" }
+  "devDependencies": { "@types/node": "^24.0.0", "esbuild": "^0.25.0", "obsidian": "^1.11.4", "tsx": "^4.20.0", "typescript": "^5.9.0" }
 }

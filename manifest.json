@@ -1,1 +1,1 @@
-{"id":"document-framer","name":"Document Framer","version":"0.1.0","minAppVersion":"1.8.7","description":"Create and inspect separate test Frames from Markdown documents.","author":"Document Framer","isDesktopOnly":false}
+{"id":"document-framer","name":"Document Framer","version":"0.1.0","minAppVersion":"1.11.4","description":"Create local test Frames and separate Gemini classification previews from Markdown.","author":"Document Framer","isDesktopOnly":false}
