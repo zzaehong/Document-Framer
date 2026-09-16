@@ -1,3 +1,4 @@
+import { MAX_HTTP_ATTEMPTS, RETRY_BASE_MS, RETRY_JITTER_MS, RETRY_MAX_MS } from './budget';
 /**
  * HTTP 통신 계층: 인증 헤더와 요청 구성, 호출 잠금, 제한된 재시도, 응답 JSON 추출을 담당한다.
  * 분류 내용의 타당성은 classification.ts가 검증한다. 실제 전송 함수는 주입하여 테스트에서 대체한다.
@@ -21,7 +22,7 @@ export class GeminiClient {
   private closed = false;
   private timedOut = false;
   private sessionId = crypto.randomUUID();
-  constructor(private transport: Transport, private sleep = delay, private timeoutMs = 60_000, private observer?: AttemptObserver) {}
+  constructor(private transport: Transport, private sleep = delay, private timeoutMs = 60_000, private observer?: AttemptObserver, private random = Math.random) {}
   get status() { return this.busy ? (this.timedOut ? 'timeout-pending' : 'running') : 'idle'; }
   close() { this.closed = true; }
   async generate(key: string, system: string, input: unknown, schema: unknown, trace?: EvaluationTrace, isValid = () => true): Promise<GenerationResult> {
@@ -50,8 +51,8 @@ export class GeminiClient {
             contents: [{ role: 'user', parts: [{ text: JSON.stringify(input) }] }],
             generationConfig: { ...GENERATION_CONFIG, responseJsonSchema: schema } }),
         };
-        // 최대 두 번 전송한다. 네트워크 실패나 지정된 일시 HTTP 오류만 1초 뒤 한 번 재시도한다.
-        for (let attempt = 1; attempt <= 2; attempt++) {
+        // 일시 오류만 최대 3회 전송한다. 지수 backoff에 작은 jitter를 더하며 timeout 잠금은 유지한다.
+        for (let attempt = 1; attempt <= MAX_HTTP_ATTEMPTS; attempt++) {
           if (stop()) throw new GeminiError('요청이 종료되었습니다.');
           current = { id: `${runId}:${attempt}`, revision: 0, sessionId: this.observer?.sessionId ?? this.sessionId,
             trace: trace ?? null, runId, purpose: trace?.purpose ?? 'connection', attemptNumber: attempt,
@@ -75,7 +76,7 @@ export class GeminiClient {
             current.endedAt = Date.now(); current.durationMs = current.endedAt - sentAt;
             current.transport = 'settled'; current.outcome = 'network-error';
             await record();
-            if (attempt === 1 && !stop()) { await this.sleep(1000); continue; }
+            if (attempt < MAX_HTTP_ATTEMPTS && !stop()) { await this.sleep(Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** (attempt - 1) + this.random() * RETRY_JITTER_MS)); continue; }
             throw new GeminiError('네트워크 연결에 실패했습니다. 원격 처리·사용량은 미확인입니다.');
           }
           // timeout/삭제/이동 뒤에도 사용량은 먼저 동일 시도에 반영한다.
@@ -89,7 +90,7 @@ export class GeminiClient {
           await record();
           if (stop()) throw new GeminiError('요청이 종료되었습니다. 늦은 응답의 사용량은 호출 기록에서 확인하세요.');
           if (response.status !== 200) {
-            if (attempt === 1 && transient.has(response.status)) { await this.sleep(1000); continue; }
+            if (attempt < MAX_HTTP_ATTEMPTS && transient.has(response.status)) { await this.sleep(Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** (attempt - 1) + this.random() * RETRY_JITTER_MS)); continue; }
             const hint = response.status === 401 || response.status === 403 ? 'API 키와 사용 권한을 확인하세요.'
               : response.status === 429 ? '요청·사용량·결제 한도를 확인하세요.'
               : response.status === 404 ? '기본 모델의 지원 여부를 확인하세요. 자동 전환하지 않습니다.'

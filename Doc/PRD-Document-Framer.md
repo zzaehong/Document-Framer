@@ -1,5 +1,5 @@
 > **Status:** Draft / Specification  
-> **Version:** 0.6
+> **Version:** 0.7
 > **Project:** Document Framer  
 > **Timebox:** 10 days  
 > **Workflow Stage:** Step 2 — Specify Observable Behavior
@@ -8,7 +8,9 @@
 
 # 1. Purpose
 
-Document Framer는 사용자가 Obsidian에 자유롭게 축적한 비정형 Markdown 문서를 자동으로 분석하여, 원문을 변경하지 않고 AI가 이후 활용할 수 있는 구조화된 Frame을 생성하는 경량 Knowledge Ingestion & Structuring Engine이다.
+Document Framer는 사용자가 Obsidian에 자유롭게 축적한 비정형 Markdown 문서를 자동으로 분석하여, 원문을 변경하지 않고 AI가 이후 활용할 수 있는 구조화된 Frame을 생성하는 최소 semantic metadata 생성 시스템이다.
+
+Frame은 WHERE(Domain), WHAT KIND(Content Nature), WHAT ABOUT(Key Concepts)에 답한다. Markdown을 재구성하거나 요약하지 않는다.
 
 사용자는 AI 활용을 위해 별도의 metadata, taxonomy 또는 문서 형식을 관리할 필요가 없어야 한다.
 
@@ -127,9 +129,9 @@ MVP에서는 다음 기능을 제공하지 않는다.
     
 6. Document-level Frame을 생성한다.
     
-7. 구조 청크별 Key Concept을 추출하고 원문 Evidence를 연결한다.
+7. 구조 청크별로 원문 언어를 보존한 Key Concept 이름을 추출한다.
     
-8. 각 Evidence에 역할 라벨을 붙이고 중복 Concept을 통합한다.
+8. 중복 Concept을 통합하고 문서 전체의 Content Nature를 판정한다.
     
 9. Frame을 저장한다.
     
@@ -144,7 +146,7 @@ MVP에서는 다음 기능을 제공하지 않는다.
 
 - Domain
     
-- Document Type
+- Content Nature
     
 - Classification Confidence
     
@@ -165,7 +167,7 @@ Engineering
 
 ## S-03 — Knowledge Concept Classification
 
-문서에서 재사용 가치가 있는 Key Concept을 추출하고 각 개념을 뒷받침하는 실제 원문 Evidence를 연결한다. Concept은 AI annotation이며 설명 요약문을 지식 원문 대신 생성하지 않는다. 하나의 Concept은 서로 떨어진 여러 Evidence를 가질 수 있다. 반복 설명·전환·목차 등은 생략할 수 있고, 문서 전체 또는 청크에서 0개 Concept도 정상이다. Semantic Label은 각 Evidence의 역할을 설명한다.
+Key Concept은 문서의 semantic index다. 원문에 등장한 용어와 언어를 우선 보존하고, 이름을 추론해야 하면 원문의 주 언어를 사용한다. 개념은 문서 전체와 연결되며 근거 구간·역할 라벨·요약문을 생성하지 않는다. 청크와 문서에서 concepts: []도 정상이다.
 
 ---
 
@@ -292,34 +294,21 @@ Domain은 최대 3단계 hierarchy를 표현할 수 있어야 한다. 승인 Cat
 
 ---
 
-## FR-05 — Document Type Classification
+## FR-05 — Content Nature Classification
 
-시스템은 Document의 전체적인 성격을 분류할 수 있어야 한다.
-
-MVP taxonomy는 최소한 다음 성격을 구분하는 것을 목표로 한다.
-
-1. 주장-근거-결론 구조의 정보성 문서
-    
-2. 아이디어 또는 메모
-    
-3. 중요한 결정이 포함된 산문/수필형 문서
-    
-4. 중요한 결정이 없는 산문/수필형 문서
-    
-
-구체적인 이름과 하위 taxonomy는 Classifier Spike 결과에 따라 확정한다.
+Content Nature는 information(정보), opinion(의견), mixed(정보 + 의견), unclassified(분류 어려움) 중 하나다. 사실·개념·이론·절차·외부 지식 정리가 중심이면 information, 작성자의 판단·주장·평가가 중심이면 opinion이다. 두 성격이 모두 문서 이해에 실질적으로 중요할 때만 mixed를 사용한다. 정보 글의 짧은 감상이나 의견 글의 짧은 사실 인용 때문에 mixed로 바꾸지 않는다. 의미·문맥이 부족할 때만 unclassified를 사용한다. 여러 청크는 전체 신호를 모델로 집계하며 단순 다수결하지 않는다.
 
 ---
 
 ## FR-06 — Key Concept Extraction
 
-기존 FR-06을 Key Concept Extraction으로 변경한다. Heading → 문단/블록 → 크기 경계 순으로 원문을 결정론적 처리 청크로 나누고, 각 청크에서 재사용 가능한 개념과 근거 블록만 선택한다. Heading은 처리 경계/맥락이며 자동 Concept이 아니다. 모든 블록을 배분할 의무는 없다. 정규화 이름 중복은 로컬 병합하고 청크 간 의미 중복은 제한된 통합 단계로 해결한다. 필수 청크 실패는 전체 완료로 공개하지 않는다.
+Heading → 문단/블록 → 크기 경계 순으로 결정론적 청크를 만들고 핵심 개념 이름을 추출한다. Heading만으로 개념을 강제하지 않는다. 개념 0개도 정상이다. NFC·대소문자·공백 정규화 중복은 로컬에서 병합하되 번역으로 동일성을 판정하지 않는다. 여러 청크의 의미 통합은 후보 표현과 언어를 보존한다. 필수 단계 실패는 완료로 공개하지 않는다.
 
 ---
 
-## FR-07 — Semantic Classification
+## FR-07 — Semantic Evidence Label 폐기
 
-Semantic Label은 Concept 자체가 아니라 Evidence가 문서 안에서 수행하는 역할을 나타낸다. Evidence마다 기존 claim/evidence/conclusion/idea/observation/decision/context/unclassified 중 하나 이상의 라벨과 confidence를 유지한다. unclassified는 단독 사용한다.
+이전 Semantic Evidence Label 요구는 폐기한다. 추적 ID FR-07은 폐기 기록으로 유지한다. 역할 라벨과 Evidence 계층은 새 schema·validator·prompt·merge·UI에 존재하지 않는다.
 
 ---
 
@@ -333,7 +322,7 @@ Confidence의 표현 방식과 threshold는 추후 결정한다.
 
 ## FR-09 — Frame Generation
 
-Document에는 기존 metadata·Domain·Type·Importance를 유지한다. concepts 배열에는 id·concept 이름·confidence·highlight·evidence 배열을 둔다. Evidence는 blockIds와 로컬 계산 startLine/endLine/startOffset/endOffset 및 labels를 가진다. AI가 작성한 요약문이나 임의 offset은 허용하지 않는다. Concept 0개도 전체 필수 단계가 성공했다면 정상이다. 이후 사용자 Concept 이름/근거 연결/Label 수정과 Clarification은 Document·Concept·Evidence를 대상으로 구분한다.
+Gemini Frame schemaVersion은 5다. document는 결정론 metadata·domains·contentNature·importance를 가진다. concepts의 항목은 id·concept·confidence·highlight만 가진다. Evidence, blockIds, 행/offset, 역할 라벨, 원문 발췌, 요약은 Concept에 저장하지 않는다. 모든 필수 단계가 성공하면 0개 Concept도 정상이다. 현재는 previewOnly: true인 메모리 미리보기이며 활성 Frame 저장은 후속이다.
 
 ---
 
@@ -347,9 +336,7 @@ Document에는 기존 metadata·Domain·Type·Importance를 유지한다. concep
 
 ## FR-11 — Frame Inspection
 
-사용자는 처리된 Document의 Frame을 확인할 수 있어야 한다.
-
-Gemini 기본 검토 화면은 Domain 경로·기존/신규 여부·Document Type·Concept 이름·Evidence 행 범위·Semantic Label·해당 원문을 구조화하여 표시한다. 신규 후보에는 승인·거절을 제공한다. Raw JSON, confidence, run ID, 모델과 평가 버전 정보는 기본으로 접힌 Developer Details에서 확인한다. confidence는 모델의 자기 평가이며 정확도 확률로 안내하지 않는다.
+기본 검토 화면은 Domain 경로·기존/신규 여부, 한국어 Content Nature, Concept 이름과 Highlight를 표시한다. 신규 Domain 승인·거절 흐름을 유지한다. Concept 아래 원문 발췌나 행 범위·라벨은 표시하지 않는다. confidence·JSON·모델·실행 버전은 접힌 Developer Details에 둔다. confidence는 모델 자기 평가이며 정확도 확률이 아니다.
 
 ---
 
@@ -361,17 +348,16 @@ Gemini 기본 검토 화면은 Domain 경로·기존/신규 여부·Document Typ
 
 ## FR-13 — Knowledge Concept Highlight
 
-사용자는 Concept의 중요성을 Highlight ON/OFF로 표시할 수 있어야 한다. 이번 2R 미리보기에서는 명시적 클릭으로 메모리의 highlight만 변경하며 재시작 시 사라짐을 표시한다. 영구 Human annotation 저장·Reframing 보존은 후속 단계다. Document Importance 요구는 유지한다.
+사용자는 Concept의 중요성을 Highlight ON/OFF로 표시할 수 있어야 한다. 이번 2S 미리보기에서는 명시적 클릭으로 메모리의 highlight만 변경하며 재시작 시 사라짐을 표시한다. 영구 Human annotation 저장·Reframing 보존은 후속 단계다. Document Importance 요구는 유지한다.
 
 ---
 
 ## FR-14 — Human Correction
 
-사용자는 AI가 생성한 Domain, Document Type 또는 Semantic Label을 수정할 수 있어야 한다.
-
-사용자가 직접 수정한 값은 AI-generated annotation과 구분되어야 한다.
+후속 단계에서 Domain, Content Nature, Concept 이름을 사용자가 수정할 수 있어야 한다. 사용자 값을 AI annotation과 구분하고 보존한다. 이번 변경은 전체 correction UI나 영구 저장을 추가하지 않는다.
 
 ---
+
 ## FR-15 — Domain Reuse and Candidate Approval
 
 기존 ID FR-15의 새 이름은 **Domain Reuse and Candidate Approval**이다.
@@ -540,13 +526,13 @@ Reframing이 수행되더라도 이러한 Human-authored 정보가 의도치 않
 
 ## AC-06 — Knowledge Concepts
 
-10개 블록 중 4개만 근거로 선택해도 검증에 성공한다. 하나의 Concept이 b2/b7/b10의 서로 떨어진 Evidence를 가질 수 있다. 의미 있는 개념이 없는 청크는 concepts: []를 허용한다. 원문은 그대로 보존된다.
+한국어 원문의 효율적 시장 가설·분산투자, 영어 원문의 Behavioral Finance, 혼합 표기의 자본자산 가격결정 모형(CAPM)을 보존할 수 있어야 한다. Evidence 없는 이름·confidence 응답 및 빈 concepts를 수용한다. 빈 이름·공백·제어/비가시 문자·예산 초과·0..1 밖 confidence는 거부한다. 원문은 변경하지 않는다.
 
 ---
 
-## AC-07 — Multi-label Semantic Annotation
+## AC-07 — Content Nature and Minimal Metadata
 
-Evidence가 claim과 context 등 여러 역할을 가지면 여러 Semantic Label을 표시할 수 있다. Concept의 이름과 Evidence의 역할을 별도로 검토할 수 있어야 한다.
+정보 설명은 information, 개인 주장은 opinion, 정보와 판단이 모두 핵심이면 mixed, 의미 부족은 unclassified다. 긴 정보 글에 마지막 한 줄 감상이 있어도 information, 긴 의견 글에 짧은 사실 인용이 있어도 opinion을 기대한다. 새 Frame에 Evidence와 Semantic Label이 없고 UI에 한국어 분류명이 표시되어야 한다.
 
 ---
 
@@ -639,7 +625,7 @@ Evidence가 claim과 context 등 여러 역할을 가지면 여러 Semantic Labe
 
 ## AC-18 — Validated Frame Publication
 
-**Given** 필수 필드 누락, 유효하지 않은 label 또는 원문 범위 밖의 Evidence 위치가 포함된 분석 결과가 있을 때
+**Given** 필수 필드 누락, 유효하지 않은 Content Nature 또는 Concept 이름/confidence가 포함된 분석 결과가 있을 때
 **When** Frame 저장을 시도하면  
 **Then** 해당 결과를 정상 완료 Frame으로 공개하지 않고 기존 정상 Frame과 사용자 정보를 보존한다.
 
@@ -663,9 +649,9 @@ Evidence가 claim과 context 등 여러 역할을 가지면 여러 Semantic Labe
 
 ## AC-21 — Unresolved Human Annotation Mapping
 
-**Given** Highlight 또는 Human Correction이 적용된 Concept/Evidence가 있고 원문 수정으로 개념 또는 근거 연결이 달라졌을 때
-**When** Reframing 후 기존 Concept/Evidence와 새 대상의 대응을 확정할 수 없으면
-**Then** 사용자 정보와 이전 대상 정보를 보존하여 연결 확인 필요로 표시하고, 임의의 새 Concept/Evidence에 적용하지 않는다. Document Importance는 동일 문서에서 유지된다.
+**Given** Highlight 또는 Human Correction이 적용된 Concept가 있고 원문 수정으로 개념 이름 또는 구성이 달라졌을 때
+**When** Reframing 후 기존 Concept와 새 대상의 대응을 확정할 수 없으면
+**Then** 사용자 정보와 이전 대상 정보를 보존하여 연결 확인 필요로 표시하고, 임의의 새 Concept에 적용하지 않는다. Document Importance는 동일 문서에서 유지된다.
 
 ---
 
@@ -826,11 +812,15 @@ MVP의 AI classification은 사용자 결정(2026-09-15)에 따라 Gemini를 bas
 
 ### OD-02 — Semantic Taxonomy v0.1
 
-Document Type과 각 Type의 하위 Semantic Label을 확정해야 한다.
+Content Nature 4종은 확정했다. 실제 corpus에서 mixed 남용과 unclassified 과용을 측정하는 기준은 미결정이다. Decision/Idea signals는 이번 범위에서 제외한다.
+
+---
 
 ### OD-03 — Structural Chunking and Concept Extraction
 
-Concept 추출과 원문 블록 Evidence 연결로 결정했다. 처리 청크 크기·추출 품질과 통합의 과병합/미병합 기준은 실문서 평가로 조정한다.
+청크 구조는 유지하고 Concept은 문서의 semantic index로 단순화한다. 원문 언어 보존·개념 선택·의미 통합의 과병합/미병합 기준은 실제 모델 평가로 조정한다.
+
+---
 
 ### OD-04 — Classification Model
 
@@ -852,15 +842,15 @@ Non-blocking / Blocking clarification을 생성하는 구체적인 조건을 결
 
 ### OD-08 — Processing Limits and Retry Budget
 
-문서 크기·입력 길이 한도, 요청 timeout, 자동 재시도 횟수·간격·중단 조건을 결정해야 한다. Classifier Spike의 비용·지연 측정에 근거해 정하고 관련 구현 및 AC 검증 전에 확정한다. 한도 초과 시 일부 내용만 조용히 잘라 처리하지 않는다.
+현재 예산과 retry 정책은 아래 2S 처리 규칙으로 확정했다. 60초 논리 호출 timeout과 종료 미확인 복구를 유지한다. 실제 비용·지연·출력 사용량을 바탕으로 향후 조정하며 한도 초과 시 일부만 조용히 처리하지 않는다.
 
 ### OD-09 — Source Identity and Annotation Mapping
 
-문서 이동·이름 변경 시 동일성 판정 방식, 원문 버전 식별, Concept/Evidence 및 Clarification anchor의 대응 기준을 Step 3에서 결정한다. 자동 재연결을 확정할 수 없을 때는 사용자 정보를 보존하고 연결 확인 필요로 표시한다. 복잡한 자동 병합과 완전한 편집 이력 관리는 MVP에 요구하지 않는다.
+문서 이동·이름 변경 시 동일성 판정 방식, 원문 버전 식별, Concept 및 Clarification anchor의 대응 기준을 Step 3에서 결정한다. 자동 재연결을 확정할 수 없을 때는 사용자 정보를 보존하고 연결 확인 필요로 표시한다. 복잡한 자동 병합과 완전한 편집 이력 관리는 MVP에 요구하지 않는다.
 
 ### OD-10 — Unclassifiable Content and Clarification Bounds
 
-Domain의 `기타`와 별개로, Document Type·Semantic Label을 결정할 수 없는 내용의 표현을 OD-02·OD-05와 함께 확정한다. 미분류 상태는 taxonomy의 새 label과 구분할 수 있다. 문서당 질문 수와 동일 질문 재생성 기준은 OD-07과 함께 정하여 무응답만으로 질문·분석이 반복되지 않도록 한다.
+의미가 부족한 문서는 Content Nature unclassified로 표현한다. 자동 질문과 재생성 기준은 후속 단계에서 정하며 무응답만으로 반복 요청하지 않는다.
 
 ---
 
@@ -910,7 +900,7 @@ FR-19의 경계 동작은 검토용 해석이며, 이 항목의 구체적인 값
 | --- | --- | --- | --- |
 | EC-01 | 빈 파일 또는 공백만 존재 | 분석할 내용 없음으로 표시하고 LLM 호출과 의미 없는 Concept 생성을 하지 않는다. 기존 Frame이 있다면 현재 빈 원문의 결과인 것처럼 표시하지 않는다. | FR-01, FR-06 / AC-16 |
 | EC-02 | 짧은 메모, 혼합 언어, 코드·표·링크만 있는 문서, 비정형 Markdown | 형식이 일정하지 않다는 이유만으로 거절하지 않는다. 읽을 수 있는 원문 범위 안에서 처리하고, 의미 분류가 불가능하면 OD-10의 미분류 동작을 적용한다. 없는 내용을 추론해 채우지 않는다. | FR-01, FR-05~08 / AC-02, AC-18 |
-| EC-03 | 파일 크기 또는 모델 입력 한도 초과 | 한도 초과와 사용자 조치를 알리고 해당 처리를 중단한다. 뒤쪽 내용을 말없이 버리거나 일부 분석을 전체 완료로 표시하지 않는다. 2R에서는 구조 청크로 처리하되 명시된 문서/청크/요청 예산을 넘으면 실패한다. | FR-01, FR-09 / AC-16; OD-08 |
+| EC-03 | 파일 크기 또는 모델 입력 한도 초과 | 한도 초과와 사용자 조치를 알리고 해당 처리를 중단한다. 뒤쪽 내용을 말없이 버리거나 일부 분석을 전체 완료로 표시하지 않는다. 2S에서는 구조 청크로 처리하되 명시된 문서/청크/요청 예산을 넘으면 실패한다. | FR-01, FR-09 / AC-16; OD-08 |
 | EC-04 | 읽기 권한 없음, 잠긴 파일, 읽을 수 없는 인코딩 | 해당 문서의 실패 사유를 표시하고 다른 문서 처리를 계속한다. 접근 복구 후 재시도할 수 있다. 원문 인코딩을 자동 변환해 덮어쓰지 않는다. | FR-01~02 / AC-17 |
 | EC-05 | 중복 저장 이벤트 또는 중복 처리 요청 | 동일 문서·원문 버전의 요청으로 활성 Frame이나 동일 질문이 중복 생성되지 않는다. 내용이 같은 별도 파일의 사용자 정보는 독립적으로 취급한다. | FR-10, FR-16, FR-18 / AC-20 |
 | EC-06 | 분석 도중 원문을 연속 수정 | 분석 대상 버전과 현재 원문을 구분한다. 뒤늦게 끝난 구버전 결과가 신버전 결과를 덮어쓰지 않으며 최신 원문의 처리 필요 여부를 표시한다. | FR-09, FR-18 / AC-19 |
@@ -972,17 +962,14 @@ Step 3에서는 OD-08~11 및 기존 Open Decisions를 해당 기능 구현 전�
 - 미승인·거절 상태는 이번 preview-only slice에서 메모리에만 유지한다. 재시작 후 후보는 사라지고 승인 Catalog만 보존된다. 이는 전체 Clarification persistence의 구현을 뜻하지 않는다.
 
 
-## 2R Concept revision — 처리 예산과 실패 정책
+## 2S Framing Core — 처리 예산과 실패 정책
 
-새 사용자 결정(prompt.md)이 기존 partition 규칙을 대체한다. 모든 원문 배분은 폐기하며 Raw Markdown에 남은 부분을 Frame 누락 오류로 취급하지 않는다.
+- 문서 512 KiB·32청크, 청크 16 KiB·64블록, 청크당 16개 Concept·문서당 128개 원시 후보, 직렬화 입력 96 KiB를 유지한다.
+- 논리 호출 최대 34회(추출 32 + 통합 1 + 문서 집계 1). HTTP는 호출당 최대 3 attempts이므로 최대 102회다. 구현은 공통 상수로 계산한다.
+- network failure 및 408/500/502/503/504만 최대 2회 재시도한다. backoff는 1.5초/3초에 최대 0.5초 jitter를 더한다. 400·429는 재시도하지 않는다.
+- timeout·미해결 요청 복구·사용량 기록·원문 보존은 유지한다. 어느 필수 단계라도 실패하면 이전 정상 미리보기를 보호한다.
+- Generation config는 유지한다. 실제 출력 사용량을 측정한 뒤 별도 결정으로 조정한다.
 
-- 문서 최대 512 KiB, 청크 최대 32개, 청크당 원문 16 KiB·64블록. 2 KiB 미만의 작은 섹션은 인접 섹션과 묶을 수 있다. Heading 우선 계획이 32청크를 넘으면 인접 섹션을 크기/블록 상한까지 다시 묶고 그래도 초과하면 실패한다. 큰 단일 블록은 줄 경계, 긴 한 줄은 Unicode 코드 포인트 경계로 나눈다. CRLF·원문 offset을 보존한다.
-- 각 청크는 Concept 최대 16개, 전체 원시 후보 최대 128개. 초과 시 잘라내지 않고 실패한다. 직렬 extraction 후 여러 청크이면 문서 Domain/Type 집계 최대 1회, 서로 다른 청크에서 남은 이름 후보가 있으면 의미 통합 최대 1회다. 논리 호출 최대 34회, 기존 1회 재시도를 포함한 HTTP 전송 최대 68회다.
-- 각 모델 입력 JSON은 96 KiB 이하로 제한한다. 추출 입력은 호출 전 전부 검사하고, 모델 출력으로 생성되는 후속 입력은 해당 호출 전에 검사한다. 한도 초과·중간 실패·파일 무효화 시 후속 호출을 중단하고 기존 정상 미리보기를 유지한다.
-- 문서 분류는 청크별 Domain/Type 신호와 개념 이름을 종합한다. 한 청크 문서는 추출 응답의 분류를 사용한다. 집계·통합에서 원문 전체를 재전송하지 않는다. Catalog는 실행 시작 시 승인 스냅샷만 사용한다.
-- Evidence 그룹 안의 block ID는 청크 내 연속 순서이고, 그룹 간에는 떨어져 있어도 된다. Concept 간 원문 공유도 허용한다. 가짜 ID·임의 위치·빈 Evidence·요약 필드는 거부한다.
-- 통합은 후보 ID를 정확히 한 번씩 배분해야 하며 원문 배분 의무와는 다르다. 통합 응답에 Evidence 작성은 허용하지 않는다. 근거와 라벨은 로컬에서 병합한다.
-- Gemini 미리보기 schemaVersion 4, 저장 data.json v3 유지. legacy 로컬 Frame은 변환하지 않으며 구 Gemini preview는 원래 메모리 전용이므로 재실행한다.
-- 기존 호출 purpose를 유지하고 trace에 framingRunId·stage·chunkId·버전·입력 해시·budget을 추가한다. 각 논리 호출 runId를 구별하여 재시도/늦은 응답이 다른 청크 이력을 덮지 않게 한다.
+## 변경 이력
 
-v0.6/2R(2026-09-16)은 최신 사용자 결정에 따라 partition을 폐기한다. 문서 중 일부만 Evidence로 선택하며 빈 Concept 결과도 정상이다. 이전 FR/AC의 ID는 유지하고 Concept/Evidence로 observable behavior를 갱신했다. Safe Reframing·영구 사용자 annotation·질문은 후속이다.
+v0.6/2R은 Concept + Evidence 연결을 시험했다. 실사용에서 문서 전체에 걸친 개념의 Evidence가 지나치게 넓어지고 복잡도 대비 MVP 가치가 부족했다. v0.7/2S는 Evidence·Semantic Label을 의도적으로 제거하고 Domain + Content Nature + Key Concepts로 단순화한다. 기존 저장 Frame과 사용자 annotation은 변형하지 않는다. 새 미리보기 schema 5와 legacy 저장 결과를 구분한다. Safe Reframing·영구 사용자 수정·Clarification은 후속이다.

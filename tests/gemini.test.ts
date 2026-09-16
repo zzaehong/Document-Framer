@@ -19,17 +19,17 @@ test('one call by default, fixed model, key only in header and JSON schema reque
   assert.ok(!request.body.includes('dummy-secret'));
   assert.equal(JSON.parse(request.body).generationConfig.responseMimeType, 'application/json');
 });
-// 일시 오류만 한 번 재시도하고 인증·사용량·모델 오류는 즉시 종료하는지 확인한다.
-test('temporary HTTP/network failures retry only once; authentication, quota and model errors never retry', async () => {
+// 일시 오류만 두 번까지 재시도하고 인증·사용량·모델 오류는 즉시 종료하는지 확인한다.
+test('temporary HTTP/network failures retry at most twice; authentication, quota and model errors never retry', async () => {
   for (const status of [408, 500, 502, 503, 504, 400, 401, 403, 404, 429]) {
     let calls = 0;
     const client = new GeminiClient(async () => { calls++; return { status, text: 'dummy-secret body' }; }, async () => {});
     await assert.rejects(generate(client), error => error instanceof Error && !error.message.includes('dummy-secret'));
-    assert.equal(calls, [408, 500, 502, 503, 504].includes(status) ? 2 : 1);
+    assert.equal(calls, [408, 500, 502, 503, 504].includes(status) ? 3 : 1);
   }
   let calls = 0;
   const network = new GeminiClient(async () => { calls++; throw new Error('dummy-secret'); }, async () => {});
-  await assert.rejects(generate(network), /네트워크/); assert.equal(calls, 2);
+  await assert.rejects(generate(network), /네트워크/); assert.equal(calls, 3);
   calls = 0;
   const recovery = new GeminiClient(async () => ++calls === 1 ? { status: 503, text: '' } : response({ recovered: true }), async () => {});
   assert.deepEqual((await generate(recovery)).value, { recovered: true }); assert.equal(calls, 2);
@@ -67,4 +67,32 @@ test('unload during retry delay prevents another request', async () => {
   let calls = 0;
   const client = new GeminiClient(async () => { calls++; return { status: 503, text: '' }; }, async () => { client.close(); });
   await assert.rejects(generate(client), /종료/); assert.equal(calls, 1);
+});
+
+// 실제 sleep 없이 두 retry의 지연과 세 번째 시도 기록·사용량을 확인한다.
+test('503 recovers on third attempt with bounded exponential jitter and separate journal entries', async () => {
+  const { AttemptJournal } = await import('../src/attempts');
+  for (const random of [0, 0.999999]) {
+    const waits: number[] = []; let calls = 0;
+    const journal = new AttemptJournal(async () => {});
+    const client = new GeminiClient(async () => {
+      calls++;
+      return calls < 3 ? { status: 503, text: '{}' } : { status: 200, text: JSON.stringify({ usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 1, totalTokenCount: 3 }, candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '{"ok":true}' }] } }] }) };
+    }, async ms => { waits.push(ms); }, 1000, journal, () => random);
+    assert.deepEqual((await generate(client)).value, { ok: true });
+    assert.equal(calls, 3); assert.equal(waits.length, 2);
+    assert.ok(waits[0] >= 1500 && waits[0] <= 2000);
+    assert.ok(waits[1] >= 3000 && waits[1] <= 3500);
+    assert.deepEqual(journal.attempts.map(a => a.attemptNumber), [1, 2, 3]);
+    assert.equal(new Set(journal.attempts.map(a => a.runId)).size, 1);
+    assert.equal(new Set(journal.attempts.map(a => a.id)).size, 3);
+    assert.equal(journal.attempts[2].usage.tokens.totalTokenCount, 3);
+  }
+});
+
+test('invalidation during second retry delay prevents a third transmission', async () => {
+  let calls = 0, waits = 0, valid = true;
+  const client = new GeminiClient(async () => { calls++; return { status: 503, text: '{}' }; }, async () => { if (++waits === 2) valid = false; });
+  await assert.rejects(client.generate('key', 'system', {}, {}, undefined, () => valid), /종료/);
+  assert.equal(calls, 2); assert.equal(waits, 2);
 });

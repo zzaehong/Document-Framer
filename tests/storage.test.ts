@@ -1,7 +1,7 @@
 /** 기존 동작을 확인하는 자동 테스트. 각 사례 위 주석은 보장하려는 조건을 설명한다. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FrameStore, GeminiKey, decodeSaved, SECRET_ID } from '../src/storage';
+import { MODEL, FrameStore, GeminiKey, decodeSaved, SECRET_ID } from '../src/storage';
 import { TestEngine } from '../src/core';
 const frame = new TestEngine().generate({ path: 'a.md', basename: 'a', text: '내용', ctime: 0, mtime: 0 });
 // 구버전 Frame을 보존하며 설정과 Frame의 동시 저장이 데이터 손실 없이 직렬화되는지 확인한다.
@@ -52,4 +52,15 @@ test('previous model settings migrate while Frames and historical attempts remai
   await store.saveSettings();
   assert.deepEqual(decodeSaved(saved), store.state);
   assert.equal(previous.settings.model, 'gemini-2.5-flash-lite');
+});
+
+// 외부/구버전 저장 결과를 발견해도 annotation을 잃는 강제 변환을 하지 않는다.
+test('legacy schema 4 payload preserves human annotations across settings writes and reload', async () => {
+  const legacy = { schemaVersion: 4, concepts: [{ id: 'c1', concept: '사용자 표현', confidence: 0.8, highlight: true, evidence: [{ blockIds: ['b1'], labels: [{ id: 'claim', confidence: 0.8 }] }] }], humanCorrection: { concept: '사용자 표현' } };
+  let saved: unknown;
+  const store = new FrameStore(async data => { saved = structuredClone(data); });
+  store.load({ version: 3, settings: { model: MODEL, secretId: SECRET_ID }, frames: { 'old.md': legacy }, attempts: [], domains: [] });
+  await store.saveSettings();
+  const next = new FrameStore(async () => {}); next.load(saved);
+  assert.deepEqual(next.state.frames['old.md'], legacy);
 });

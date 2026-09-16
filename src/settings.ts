@@ -5,7 +5,7 @@
 import { App, PluginSettingTab, Setting, TextComponent } from 'obsidian';
 import type DocumentFramer from './main';
 import { MODEL } from './storage';
-import { BUDGET } from './budget';
+import { BUDGET, MAX_HTTP_ATTEMPTS } from './budget';
 
 export class FramerSettingsTab extends PluginSettingTab {
   constructor(app: App, private framer: DocumentFramer) { super(app, framer); }
@@ -14,7 +14,7 @@ export class FramerSettingsTab extends PluginSettingTab {
     el.empty();
     el.createEl('h2', { text: 'Document Framer · Gemini' });
     el.createEl('p', { text: `긴 문서는 최대 ${BUDGET.maxChunks}개 청크로 처리합니다. 문서당 최대 ${BUDGET.maxLogicalRequests}회 요청, 재시도 포함 최대 ${BUDGET.maxHttpAttempts}회 전송입니다.` });
-    el.createEl('p', { text: `모델: ${MODEL} · 동시 호출 1개 · 일시 오류 재시도 최대 1회 · 모델 자동 전환 없음` });
+    el.createEl('p', { text: `모델: ${MODEL} · 동시 호출 1개 · 일시 오류 재시도 최대 ${MAX_HTTP_ATTEMPTS - 1}회 · 모델 자동 전환 없음` });
     el.createEl('p', { text: '미리보기 요청 시 현재 문서의 텍스트를 Google Gemini로 전송합니다. API 이용 요금이 발생할 수 있습니다. 연결 확인은 짧은 테스트 문장만 전송합니다.' });
     el.createEl('p', { text: '무상 API에서는 입력·출력이 제품·머신러닝 개선에 이용되고 사람이 검토할 수 있습니다. 민감·기밀·개인정보를 보내지 마세요. 프런트매터와 코드도 전송됩니다. 유료 서비스는 제품 개선에 사용하지 않지만 안전·보안 목적의 제한적 보관이 있습니다.' });
     el.createEl('p', { text: 'API는 활성 결제 계정에 연결된 프로젝트로 접근할 때 유료 서비스에 해당합니다. EEA·스위스·영국은 무상 이용에도 유료 서비스의 데이터 처리 조건이 적용되는 예외가 있습니다. 키나 연결 성공만으로 적용 조건을 판정하지 않습니다. 정책 확인: 2026-09-15.' });

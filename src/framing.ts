@@ -4,7 +4,7 @@
  * 중간 응답은 이 실행의 지역 변수에만 둔다. 어느 필수 단계든 실패하면 Preview를 반환하지 않는다.
  */
 import { Source, Frame, TestEngine } from './core';
-import { Block, SEGMENTER_VERSION } from './blocks';
+import { SEGMENTER_VERSION } from './blocks';
 import { Classification, RESPONSE_SCHEMA, RESPONSE_SCHEMA_VERSION, TAXONOMY_VERSION, validateClassification } from './classification';
 import { PROMPT_VERSION, SYSTEM_PROMPT } from './classification-prompt';
 import { EXTRACTION_PROMPT, EXTRACTION_PROMPT_VERSION, CONSOLIDATION_PROMPT, CONSOLIDATION_PROMPT_VERSION } from './concept-prompts';
@@ -17,7 +17,7 @@ import { BUDGET, PIPELINE_VERSION, budgetError, checkInputBudget } from './budge
 import { ConceptCandidate, Extraction, KnowledgeConcept, EXTRACTION_SCHEMA, CONCEPT_SCHEMA_VERSION, CONSOLIDATION_SCHEMA, CONSOLIDATION_SCHEMA_VERSION, CONSOLIDATION_VERSION, validateExtraction, mergeExactCandidates, needsSemanticConsolidation, validateConsolidation } from './concepts';
 
 export interface PreviewFrame {
-  schemaVersion: 4;
+  schemaVersion: 5;
   engine: 'gemini';
   model: typeof MODEL;
   taxonomyVersion: typeof TAXONOMY_VERSION;
@@ -29,7 +29,7 @@ export interface PreviewFrame {
   document: Omit<Frame['document'], 'domains' | 'type' | 'confidence'> & Classification;
   concepts: KnowledgeConcept[];
 }
-export interface Preview { frame: PreviewFrame; blocks: Block[]; sourceText: string; domainReviews: Record<string, 'approved' | 'rejected'> }
+export interface Preview { frame: PreviewFrame; sourceText: string; domainReviews: Record<string, 'approved' | 'rejected'> }
 export class GeminiFramer {
   // transport 잠금은 HTTP 한 개를 보호한다. 이 잠금은 호출 사이의 await까지 포함한 문서 실행을 보호한다.
   private running = false;
@@ -42,10 +42,10 @@ export class GeminiFramer {
       source = { ...source };
       const catalog = decodeDomains(existingDomains);
       const metadata = new TestEngine().generate(source).document;
-      const { blocks, chunks } = structuralChunks(source.text);
+      const { chunks } = structuralChunks(source.text);
       if (!chunks.length) throw new Error('처리할 내용이 없습니다.');
       const inputs = chunks.map(chunk => ({ existingDomains: catalog, headingContext: chunk.headingContext,
-        blocks: chunk.blocks.map(({ id, kind, text }) => ({ id, kind, text })) }));
+        blocks: chunk.blocks.map(({ kind, text }) => ({ kind, text })) }));
       // 모든 추출 입력의 예산을 먼저 확인한다. 뒤쪽 청크가 크다는 이유로 앞부분만 유료 처리하지 않는다.
       inputs.forEach(checkInputBudget);
       const framingRunId = crypto.randomUUID();
@@ -79,37 +79,37 @@ export class GeminiFramer {
       for (const [index, chunk] of chunks.entries()) {
         progress(`개념 추출 ${index + 1}/${chunks.length}`);
         const value = await call('concept-extraction', EXTRACTION_PROMPT, EXTRACTION_PROMPT_VERSION, EXTRACTION_SCHEMA, CONCEPT_SCHEMA_VERSION, inputs[index], chunk.id);
-        const extraction = validateExtraction(value, chunk.blocks, catalog, chunk.id);
+        const extraction = validateExtraction(value, catalog, chunk.id);
         extractions.push(extraction); candidates.push(...extraction.concepts);
         if (candidates.length > BUDGET.maxCandidates) budgetError();
       }
       // 원시 후보 수 제한은 병합 전에 적용한다. 중복이 많아도 처리 비용이 무한히 증가하지 않게 한다.
-      candidates = mergeExactCandidates(candidates, blocks);
+      candidates = mergeExactCandidates(candidates);
       if (needsSemanticConsolidation(candidates)) {
         progress('청크 간 개념 통합 중…');
         const value = await call('concept-consolidation', CONSOLIDATION_PROMPT, CONSOLIDATION_PROMPT_VERSION, CONSOLIDATION_SCHEMA, CONSOLIDATION_SCHEMA_VERSION,
           { candidates: candidates.map(({ candidateId, concept, chunkIds }) => ({ candidateId, concept, chunkIds })) });
-        candidates = validateConsolidation(value, candidates, blocks);
+        candidates = validateConsolidation(value, candidates);
       }
-      // 긴 문서의 Domain/Type은 모든 청크 신호로 한 번 결정한다. 원문 전체 재전송이나 첫 청크 편향을 피한다.
-      let classification: Classification = { domains: extractions[0].domains, type: extractions[0].type };
+      // 긴 문서의 Domain/Content Nature는 모든 청크 신호로 한 번 결정한다. 원문 전체 재전송이나 첫 청크 편향을 피한다.
+      let classification: Classification = { domains: extractions[0].domains, contentNature: extractions[0].contentNature };
       if (chunks.length > 1) {
-        progress('문서 Domain·Type 분류 중…');
+        progress('문서 Domain·Content Nature 분류 중…');
         const value = await call('document-classification', SYSTEM_PROMPT, PROMPT_VERSION, RESPONSE_SCHEMA, RESPONSE_SCHEMA_VERSION,
-          { existingDomains: catalog, chunks: extractions.map((item, index) => ({ chunkId: chunks[index].id, domains: item.domains, type: item.type, concepts: item.concepts.map(c => c.concept) })) });
+          { existingDomains: catalog, chunks: extractions.map((item, index) => ({ chunkId: chunks[index].id, domains: item.domains, contentNature: item.contentNature, sourceBytes: chunks[index].bytes, concepts: item.concepts.map(c => c.concept) })) });
         classification = validateClassification(value, catalog);
       }
       ensureValid();
       const { domains: _domains, type: _type, confidence: _confidence, ...local } = metadata;
       const frame: PreviewFrame = {
-        schemaVersion: 4, engine: 'gemini', model: MODEL, taxonomyVersion: TAXONOMY_VERSION,
+        schemaVersion: 5, engine: 'gemini', model: MODEL, taxonomyVersion: TAXONOMY_VERSION,
         generatedAt: new Date().toISOString(), previewOnly: true, evaluation: calls[0].trace, modelVersion: calls[0].modelVersion,
         processing: { chunkCount: chunks.length, completedChunks: extractions.length, calls },
         document: { ...local, ...classification },
         concepts: candidates.map((candidate, index) => ({ id: `concept-${index + 1}`, concept: candidate.concept,
-          confidence: candidate.confidence, evidence: candidate.evidence, highlight: false })),
+          confidence: candidate.confidence, highlight: false })),
       };
-      return { frame, blocks, sourceText: source.text, domainReviews: Object.create(null) };
+      return { frame, sourceText: source.text, domainReviews: Object.create(null) };
     } finally { this.running = false; }
   }
   // 연결 확인은 한 청크의 고정 문장으로 추출 응답까지 검증하며 사용자 문서를 사용하지 않는다.

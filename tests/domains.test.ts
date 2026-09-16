@@ -15,7 +15,7 @@ import { sourceHash, GENERATION_CONFIG } from '../src/evaluation';
 const catalog = [{ path: ['Economics'] }];
 const source = { path: 'economics.md', basename: 'economics', text: '행동경제학에서는 손실 회피가 의사 결정에 영향을 준다.', ctime: 0, mtime: 0 };
 const blocks = extractBlocks(source.text);
-const result = (domains: Classification['domains']): Classification => ({ domains, type: { id: 'informational', confidence: 0.8 } });
+const result = (domains: Classification['domains']): Classification => ({ domains, contentNature: { id: 'information', confidence: 0.8 } });
 const existing = () => result([{ path: ['Economics'], source: 'existing', confidence: 0.9 }]);
 const response = (value: unknown): HttpResponse => ({ status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(value) }] } }] }) });
 
@@ -110,7 +110,7 @@ test('framer sends and validates the same Catalog snapshot, tracks prefix hash w
   assert.deepEqual(sent.existingDomains, catalog);
   assert.equal(preview.frame.document.domains[0].source, 'existing');
   const trace = preview.frame.evaluation;
-  assert.equal(trace.promptVersion, 'concept-extraction-v1'); assert.equal(trace.responseSchemaVersion, 'concept-extraction-schema-v1');
+  assert.equal(trace.promptVersion, 'concept-extraction-v2'); assert.equal(trace.responseSchemaVersion, 'concept-extraction-schema-v2');
   assert.equal(trace.domainCatalogHash, await sourceHash(JSON.stringify(catalog)));
   assert.equal(trace.domainCatalogCount, 1); assert.equal(trace.domainCatalogEncoding, 'catalog-json-v1');
   assert.deepEqual(trace.generationConfig, GENERATION_CONFIG);

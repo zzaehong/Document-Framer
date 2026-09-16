@@ -122,11 +122,11 @@ Document Detection / Ingestion
         ↓
 Deterministic Metadata Extraction
         ↓
-Key Concept Extraction + Source Evidence Linking
+Key Concept Indexing
         ↓
 Lightweight Classification
         ├─ Domain
-        └─ Semantic Labels
+        └─ Content Nature
         ↓
 Frame Generation
         ↓
@@ -145,7 +145,7 @@ MVP의 목적은 Personal RAG 자체를 완성하는 것이 아니라 **Personal
 
 ### Classification Quality
 
-Domain과 Semantic Label이 이후 지식 검색 및 활용에 사용할 수 있을 정도로 유용하게 분류되어야 한다.
+Domain과 Content Nature이 이후 지식 검색 및 활용에 사용할 수 있을 정도로 유용하게 분류되어야 한다.
 
 정확한 목표 수치는 현재 확정하지 않는다.
 
@@ -153,7 +153,7 @@ Domain과 Semantic Label이 이후 지식 검색 및 활용에 사용할 수 있
 
 ### Human Friction
 
-일반적인 문서 추가 과정에서는 사용자가 metadata나 semantic label을 직접 입력할 필요가 없어야 한다.
+일반적인 문서 추가 과정에서는 사용자가 metadata나 metadata을 직접 입력할 필요가 없어야 한다.
 
 기본적인 사용자 경험은 다음과 같아야 한다.
 
@@ -251,11 +251,11 @@ LLM이 필요하지 않은 정보를 자동으로 추출한다.
 - 수정 정보
 - 기타 기계적으로 확인 가능한 metadata
 
-### Key Concept Extraction + Source Evidence Linking
+### Key Concept Indexing
 
-재사용 가능한 핵심 개념을 추출하고 해당 개념을 뒷받침하는 실제 원문 위치를 연결한다. 모든 원문을 배분하지 않으며 0개 개념도 정상이다.
+Key Concept은 문서의 semantic index다. 원문 표현과 언어를 보존한 이름만 추출한다. 0개 개념도 정상이며 원문 전체를 재구성하거나 요약하지 않는다.
 
-정확한 기본 단위는 아직 결정하지 않았다.
+---
 
 ### Domain Classification
 
@@ -271,24 +271,11 @@ Engineering
 
 하나의 문서는 여러 Domain에 속할 수 있다.
 
-### Semantic Classification
+### Content Nature Classification
 
-문서 내부 내용을 의미적 역할에 따라 분류한다.
+Content Nature는 information(정보), opinion(의견), mixed(정보 + 의견), unclassified(분류 어려움) 중 하나다. 부차적인 감상이나 사실 인용만으로 mixed를 사용하지 않는다. 두 성격이 모두 핵심일 때만 mixed를 사용한다.
 
-현재까지 논의된 후보에는 다음이 포함된다.
-
-- Claim
-- Evidence
-- Reasoning
-- Conclusion
-- Opinion
-- Idea
-- Decision
-- Question
-- Observation
-- Reference
-
-최종 taxonomy는 아직 확정하지 않는다.
+---
 
 ### Confidence
 
@@ -392,7 +379,7 @@ Document Framer는 문서를 **구조화**하는 제품이며, 문서 내용의 
 
 사용자는 다음을 알 필요가 없어야 한다.
 
-- Label taxonomy 구조
+- Content Nature 분류 기준
 - Metadata schema
 - Knowledge Concept 내부 구조
 - AI model
@@ -495,9 +482,9 @@ Raw Document
 Preserved Content   Framing Pipeline
                       │
                       ├─ Metadata
-                      ├─ Concept Extraction + Evidence Linking
+                      ├─ Key Concept Indexing
                       ├─ Domain
-                      ├─ Semantic Labels
+                      ├─ Content Nature
                       └─ Confidence
                               │
                               ▼
@@ -516,9 +503,9 @@ Preserved Content   Framing Pipeline
     
 3. deterministic metadata와 문서 구조를 추출한다.
     
-4. 문서를 구조 청크로 처리하여 Key Concept과 Source Evidence를 추출한다.
+4. 문서를 구조 청크로 처리하여 원문 언어의 Key Concept을 추출·통합한다.
     
-5. 저비용 classification을 통해 Domain과 Semantic Label을 생성한다.
+5. 저비용 classification을 통해 Domain과 Content Nature를 생성한다.
     
 6. classification 결과와 confidence를 Frame으로 저장한다.
     
@@ -545,50 +532,15 @@ Preserved Content   Framing Pipeline
 
 ---
 
-## 7.2 Semantic Label Taxonomy
+## 7.2 Content Nature Taxonomy
 
-Semantic classification은 먼저 문서의 성격을 상위 수준에서 분류한 뒤,
-필요한 경우 하위 Semantic Label을 적용하는 계층 구조를 사용한다.
-
-초기 Document Type은 다음 네 가지 성격을 구분하는 것을 목표로 한다.
-
-1. 주장-근거-결론의 구조를 가진 정보성 문서
-2. 간단한 아이디어를 담은 메모
-3. 산문·수필 형태이지만 프로젝트 또는 사용자의 중요한 결정이 포함된 문서
-4. 산문·수필 형태이며 중요한 결정이 포함되지 않은 문서
-
-4번을 제외한 1~3번은 문서의 성격에 따라 하위 Semantic Label을 적용할 수 있다.
-
-예를 들어 정보성 문서는 다음과 같이 세분화할 수 있다.
-
-- Claim
-- Evidence
-- Reasoning
-- Conclusion
-
-아이디어/메모는 다음과 같이 세분화할 수 있다.
-
-- Idea
-- Question
-- Observation
-
-중요한 결정이 포함된 문서는 다음과 같이 세분화할 수 있다.
-
-- Decision
-- Reflection
-- Observation
-
-하나의 Evidence에는 여러 Semantic Label이 동시에 적용될 수 있다. Concept은 이 Evidence들의 의미상 중심이다.
-
-구체적인 Label 구성과 계층은 Classifier Spike를 통해 조정한다.
+문서 전체의 Content Nature 4종을 사용한다. 사실·설명·외부 지식 중심은 information, 작성자 판단 중심은 opinion, 양쪽 모두 중요하면 mixed, 의미 부족은 unclassified다. Evidence 역할 라벨과 기존 Document Type은 폐기한다. Decision/Idea signals는 후속 후보일 뿐 이번 taxonomy에 포함하지 않는다.
 
 ---
 
 ## 7.3 Knowledge Concept Granularity
 
-Document-level Domain/Type은 유지한다. 구조 청킹은 로컬에서 결정론적으로 수행하고 청크별 Concept 추출 후 원문 참조를 보존하여 중복 개념을 통합한다.
-
-자세한 내용은 MVP개발을 진행하며 결정한다.
+긴 문서는 기존 구조 청크로 처리한다. 개념은 문서 전체를 가리키며 이름·confidence·highlight만 가진다. NFC/대소문자/공백 중복을 로컬 병합하고 제한된 의미 통합에서 후보 언어와 표현을 보존한다. 번역 정규화는 하지 않는다.
 
 ---
 
@@ -597,7 +549,7 @@ Document-level Domain/Type은 유지한다. 구조 청킹은 로컬에서 결정
 2026-09-15 사용자 결정에 따라 Gemini를 baseline으로 사용하며 현재 기본 모델은 gemini-3.1-flash-lite다.
 
 Classifier Spike에서는 해당 모델을 baseline으로 사용하여
-Document Framer에 필요한 Domain / Document Type / Semantic Label
+Document Framer에 필요한 Domain / Content Nature / Key Concepts
 classification 품질을 검증한다.
 
 평가 항목은 다음과 같다.
@@ -657,7 +609,7 @@ Step 3 Technical Design에서 구체적인 대안을 비교한다.
 
 사용자 중요도는 기본적으로 Document 단위에 적용한다.(점수 시스템. 10점 만점)
 
-AI가 청킹으로 나누어 둔 단위에 대해 추가적인 중요도를 매길 수 있도록 한다.(하이라이트 표시 on/off를 통한 심플한 표식)
+추출된 Knowledge Concept에 대해 추가적인 중요도를 매길 수 있도록 한다.(하이라이트 표시 on/off를 통한 심플한 표식)
 
 ---
 
@@ -696,25 +648,15 @@ AI가 청킹으로 나누어 둔 단위에 대해 추가적인 중요도를 매�
 
 ## 8.2 Critical Risk — Taxonomy Ambiguity
 
-실제 문장에서 Claim / Opinion / Conclusion / Decision 등이 명확하게 분리되지 않을 수 있다.
-
-예:
-
-> "나는 이 구조가 가장 좋다고 생각하고 앞으로 이렇게 구현할 것이다."
-
-이는 Opinion이면서 Decision일 수도 있다.
-
-따라서 MVP는 처음부터 완벽한 mutually-exclusive classification을 전제로 하지 않는다.
-
-**Multi-label classification을 기본 방향으로 한다.**
+정보와 의견이 함께 등장한다는 이유만으로 mixed를 남용할 위험이 있다. 주된 성격을 우선하고 두 성격 모두 실질적으로 중요할 때만 mixed로 분류하는 평가 corpus를 둔다. 실제 모델 품질은 mock 계약 테스트와 구분한다.
 
 ---
 
 ## 8.3 Critical Risk — Classification Granularity
 
-Knowledge Concept이 지나치게 작으면 inference 비용이 폭증하고, 지나치게 크면 semantic information이 손실된다.
+너무 일반적인 Concept 이름은 색인 가치가 낮고 지나치게 세분화하면 불필요한 후보가 늘어난다.
 
-따라서 segmentation 전략은 모델 benchmark와 함께 검증할 필요가 있다.
+따라서 개념 선택과 청크 통합 품질을 실제 모델로 평가한다.
 
 ---
 
@@ -795,8 +737,8 @@ Spike의 목적은 구현이 아니라 불확실성을 제거하는 것이다.
 - 사용자는 taxonomy나 metadata 구조를 이해할 필요가 없다.
 - deterministic metadata는 가능한 한 AI 없이 생성한다.
 - Domain classification을 수행한다.
-- Semantic classification을 수행한다.
-- Semantic classification은 multi-label을 허용하는 방향으로 설계한다.
+- Content Nature classification과 Key Concept indexing을 수행한다.
+- Content Nature는 4종 중 하나이며 Domain만 복수 선택을 허용한다.
 - 기본 classification은 Cheap-by-default다.
 - 비싼 reasoning model을 기본 ingestion pipeline에 사용하지 않는다.
 - 자동 논리적 강도 평가는 MVP에서 제외한다.
@@ -810,9 +752,9 @@ Spike의 목적은 구현이 아니라 불확실성을 제거하는 것이다.
 - Domain classification은 3단계 계층 구조를 사용한다.
 - Domain은 multi-label을 허용한다.
 - 기존 taxonomy에 없는 Domain은 AI가 후보를 제안하고 사용자가 Non-blocking 방식으로 확인한다.
-- Semantic classification은 Document Type → Semantic Label의 계층 구조를 기본 방향으로 한다.
+- Content Nature는 문서 전체의 성격을 나타내는 단일 분류다.
 - Document를 ingestion 및 상위 classification 단위로 사용한다.
-- Document 내부에서 Key Concept을 추출하고 Evidence별 Semantic Label을 붙인다.
+- Key Concept은 원문 언어의 이름으로 문서 전체를 가리킨다.
 - MVP Classification Model의 baseline은 Gemini다.
 - Document Importance는 1–10 점수로 표현한다.
 - Knowledge Concept의 중요성은 Highlight on/off로 표현한다.
@@ -823,17 +765,13 @@ Spike의 목적은 구현이 아니라 불확실성을 제거하는 것이다.
 
 ### A-01
 
-Document를 ingestion 및 상위 classification 단위로 사용하고,
-Document를 구조 청크로 처리하고 재사용 가능한 Concept을 추출한다. 각 Concept은 여러 원문 Evidence를 가지며 Semantic Label은 Evidence의 역할을 나타낸다. 원문 전체를 배분하지 않는다.
+최소 semantic metadata가 이후 지식 활용에 유용하다고 가정한다. 문서의 Domain·Content Nature·원문 언어 Key Concept을 생성하고 원문은 Source of Truth로 보존한다.
 
-2R의 구조 청크/개념 추출/근거 연결을 사용하며 청크 크기와 품질 기준은 실제 평가로 조정한다.
-
-Markdown Heading, paragraph, AI 기반 semantic chunking 등의 방법을
-Classifier Spike 및 MVP 구현 과정에서 비교하고 결정한다.
+---
 
 ### A-02
 
-작거나 저렴한 모델로 Domain/Semantic classification을 충분한 수준까지 수행할 수 있을 것으로 가정한다.
+작거나 저렴한 모델로 Domain/Content Nature classification을 충분한 수준까지 수행할 수 있을 것으로 가정한다.
 
 Classifier Spike에서 검증한다.
 
@@ -846,9 +784,9 @@ Classifier Spike에서 검증한다.
 ## Open Decisions
 
 1. 승인 Catalog의 의미상 재사용 품질·동의어/다국어·장기 관리 정책
-2. Semantic Label Taxonomy v0.1의 실제 하위 Label
-3. Knowledge Concept segmentation 방식
-4. Frame persistence 방식
+2. Content Nature의 mixed 판정 및 실제 품질 평가 기준
+3. 원문 언어 보존·개념 선택·통합 품질의 평가 기준
+4. Gemini 활성 Frame 저장과 사용자 수정 보존 방식
 5. Clarification trigger의 구체적인 조건
 6. Classification success threshold
 7. Gemini baseline의 실제 분류 품질 합격 기준
@@ -865,9 +803,11 @@ Taxonomy, 모델, 저장 기술 등의 세부 사항은 이후 specification 또
 
 ## 2026-09-15 Domain / Review 결정 반영
 
-PRD S-02/S-06, FR-04/FR-11/FR-15, AC-04/AC-05/AC-12와 동일한 정책을 따른다. 기본 검토는 Domain·출처·Type·Concept·Evidence·Label·원문 중심이며 confidence와 JSON/평가 정보는 접힌 Developer Details에 둔다. Phase 2는 후보 승인 Catalog 저장만 추가하고 활성 Frame publication·전체 사용자 수정·Reframing·자동 실행은 후속 단계로 유지한다.
+PRD S-02/S-06, FR-04/FR-11/FR-15, AC-04/AC-05/AC-12와 동일한 정책을 따른다. 기본 검토는 Domain·출처·Content Nature·Concept 이름·Highlight 중심이며 confidence와 JSON/평가 정보는 접힌 Developer Details에 둔다. Phase 2는 후보 승인 Catalog 저장만 추가하고 활성 Frame publication·전체 사용자 수정·Reframing·자동 실행은 후속 단계로 유지한다.
 
 
 ## Concept-based Framing 사용자 결정
 
-Document Framer는 Raw Document에서 재사용 가치가 높은 핵심 개념을 발견하고 각 개념을 뒷받침하는 원문 위치를 연결하는 Knowledge Structuring Layer다. Concept은 AI annotation, Evidence는 실제 Raw Markdown이다. 하나의 개념에 여러 비연속 근거를 연결하며, 전환 문장·반복·목차를 모두 포함할 의무는 없다. 긴 문서는 bounded structural chunk로 처리하고 같은 개념을 로컬/제한된 모델 통합으로 모은다. Domain 승인 Catalog·Document Type·원문 보존 원칙은 유지한다. Concept Highlight를 검토 화면에 두며 전체 correction·Clarification·Safe Reframing은 후속이다.
+이전 2R에서 Concept + Evidence 연결을 시험했으나 문서 전반에 걸친 개념의 근거 구간이 넓어지고 복잡도 대비 가치가 낮았다. 새 2S 결정은 Evidence와 역할 라벨을 제거한다. Document Framer는 Markdown을 재구성하거나 요약하지 않고 WHERE(Domain), WHAT KIND(Content Nature), WHAT ABOUT(Key Concepts)에 답하는 최소 semantic metadata 시스템이다. Domain lifecycle, 원문 보존, 구조 청크와 통합을 유지한다. 사용자 Highlight는 메모리 미리보기에서 유지한다.
+
+---

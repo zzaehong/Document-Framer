@@ -1,3 +1,5 @@
+> 현재 구현은 문서 끝의 **2S Framing Core 단순화**다. 앞부분의 Type/Unit/Label/Evidence와 retry·예산·테스트 수는 해당 시점의 역사적 기록이다.
+
 # 2단계 구현 기록 · Gemini 분류 미리보기
 
 > 아래 최초 구현 기록의 고정 Domain·v2 저장·프롬프트 v1은 당시 상태다. 현재 정책은 문서 마지막의 Phase 2 revision을 따른다.
@@ -163,3 +165,54 @@ Highlight는 미리보기의 사용자 선택이며 메모리에서만 유지한
 - Concept 통합 판단의 사용자 검토·되돌리기. 의미 유사도 DB·embedding·RAG·Concept graph는 도입하지 않았다.
 
 실제 외부 Gemini 호출 및 Obsidian GUI 수동 검수는 이번 자동 검증에 포함하지 않았다. 사용 절차와 평가 항목은 README의 2R 항목에 정리했다. PRD/Brief/Plan의 현재 제품 정의를 Concept/Evidence로 정리했으며, 이 문서 앞부분의 이전 구현 기록은 역사적으로 보존했다.
+
+## 2S Framing Core 단순화 (2026-09-16)
+
+최신 `prompt.md`를 기준으로 PRD 0.7 / Brief / Plan을 먼저 수정한 뒤 schema → validator → prompt → orchestration → Review → retry/예산 → tests/build 순으로 반영했다. 2R의 Evidence linking은 문서 전체 개념에 대한 근거 범위가 과도하게 넓어지고 복잡도 대비 MVP 가치가 부족하여 의도적으로 제거했다.
+
+### 현재 계약
+
+- Gemini Frame schema 5: `document.domains`, `document.contentNature`, `concepts[{id, concept, confidence, highlight}]`. Concept에 Evidence·blockIds·행/offset·역할 라벨·원문 발췌·요약을 저장하지 않는다.
+- Content Nature: information(정보), opinion(의견), mixed(정보 + 의견), unclassified(분류 어려움). 부차적인 감상/사실 인용은 mixed의 충분조건이 아니다. 긴 문서는 청크별 성격·개념·본문 크기로 문서 분류를 한 번 집계하며 다수결하지 않는다.
+- Concept은 문서 전체의 semantic index다. 명시된 원문 용어·언어·약어 표기를 우선 보존하고 추론한 이름은 원문의 주 언어를 사용한다. 복잡한 언어 탐지나 번역 정규화는 추가하지 않았다.
+- 정규화 exact merge는 NFC/대소문자/공백만 사용한다. 의미 통합은 기존 후보 이름을 우선하고 한국어 후보를 영어 canonical term으로 바꾸지 않도록 지시한다. 통합 후보의 누락·중복·위조 검사는 유지한다.
+- Concept validator는 배열·예산·이름 길이/trim/제어 및 비가시 문자·finite 0..1 confidence와 응답 필드만 검사한다. 실패 문구는 모델 응답 형식 문제로 안내한다. 단어의 언어·의미 적합성을 로컬 검증 성공으로 보장하지 않는다.
+- 기본 Review는 Domain, 한국어 Content Nature, Concept 이름, Highlight만 표시한다. confidence와 내부 JSON은 Developer Details에 둔다.
+
+### Retry / 처리 예산
+
+`budget.ts`의 `MAX_HTTP_ATTEMPTS = 3`을 transport와 문서 HTTP 예산 계산이 공유한다. 네트워크 실패와 408/500/502/503/504만 초기 요청 + 최대 2회 retry한다. 1.5초/3초의 지수 backoff에 0~0.5초 jitter를 더하며 상한은 5초다. 400·429·응답 검증 실패는 retry하지 않는다. sleep과 random은 테스트에서 주입한다.
+
+문서 512 KiB, 32청크, 청크당 16 KiB/64블록, 16개 Concept/문서 128개 원시 후보, 입력 JSON 96 KiB는 유지한다. 논리 요청 최대 34회에 3을 곱해 HTTP 최대 102회를 계산한다. 패널·설정은 같은 BUDGET 값을 표시한다. 60초 논리 호출 timeout·미해결 요청 복구·시도별 사용량 기록·중간 실패 보호는 유지하며 generation config는 변경하지 않았다.
+
+### 저장 및 migration 조사
+
+현재 구현의 Gemini schema 4 결과는 메모리 미리보기였으며 영구 저장 API에 쓰지 않았다. checkout의 `.test-vault`에는 `data.json`이 없었다. 외부 Vault 저장 파일은 조사하지 않았다. 새 Gemini 결과도 schema 5의 메모리 미리보기다. `data.json` v3와 legacy 로컬 Frame은 유지한다. 구버전 payload가 저장된 경우에도 이름·Highlight 등 사용자 annotation을 조용히 제거하는 변환을 하지 않고 legacy로 보존한다. 구버전 schema 4 payload 보존/재로드 테스트를 추가했다.
+
+### 버전 / 수정 파일
+
+- `classification.ts`: Content Nature taxonomy 및 한국어 표시명, 문서 응답 schema v4. Domain 검증 규칙은 유지.
+- `classification-prompt.ts`: 문서 분류 prompt v4, mixed 남용 방지 및 전체 신호 집계.
+- `concept-prompts.ts`: 추출/통합 prompt v2, Source-Language-First 규칙.
+- `concepts.ts`: 추출 schema v2, 통합 알고리즘 v2, Evidence 생성/검증/병합 제거. 통합 응답 모양은 같아 schema v1 유지.
+- `framing.ts`: Frame 5, pipeline v2, 청크 분류와 최종 Content Nature 연결, 사용하지 않는 미리보기 blocks 제거.
+- `main.ts`: 한국어 성격과 개념 이름 중심 Review. `settings.ts`: 공통 상수 기반 retry·전송 예산 안내. `chunks.ts`: 동작 변경 없이 오래된 Evidence 주석 정리.
+- `gemini.ts` / `budget.ts`: 제한된 retry/backoff와 계산식 기반 예산. Journal·Catalog·SecretStorage 저장 구현은 유지.
+
+### 검증 결과
+
+- `npm test`: **82 passed, 0 failed**. 외부 API를 호출하지 않고 IPC 소켓 제한이 없는 실행 환경에서 검증했다. retry 지연은 fake sleep으로 대체했다.
+- `npm run build`: TypeScript 검사 통과 및 `main.js` 정상 생성.
+- `git diff --check`: 통과.
+- 기존 테스트 파일에서 Evidence 블록/Label 검증을 제거하고 최소 개념 계약으로 교체했다. Domain, 구조 청크, exact/semantic merge, timeout, Journal, usage, SecretStorage, stale 결과 차단, 원문 해시, 저장 회귀는 유지했다.
+- `tests/content-nature.test.ts`와 `tests/fixtures/framing-evaluation.ts`: 한국어/영어/약어, 성격 4종, mixed 남용 방지 기대 응답, 집계·버전 추적. mock은 의미 품질을 입증하지 않는다.
+- `tests/gemini.test.ts`: 503→200, 503→503→200, 503 3회 실패, 400/429 무재시도, backoff/jitter 범위와 retry 대기 중 무효화.
+- 최대 34개 논리 요청/102 HTTP 전송, 세 번째 시도 Journal/usage, UI 한국어 4종, legacy 사용자 annotation 보존을 검증했다.
+
+### Open Decisions
+
+실제 Gemini의 한국어/영어 표현 보존, mixed/unclassified 판정, 개념 선택 및 과병합/미병합 품질을 실문서로 평가해야 한다. Generation config를 조정하기 전 실제 usage를 수집한다. Safe Reframing의 개념 ID 대응과 사용자 수정·Highlight 영구 보존 정책은 후속 결정이다. 실제 외부 Gemini 호출과 Obsidian GUI 검수는 이번 자동 검증에 포함하지 않았다.
+
+### Change Candidates — 구현 제외
+
+Retry-After 기반 429 처리, Decision/Idea signals, 실패 청크 재개/중간 캐시, 통합 결과 사용자 되돌리기는 후속 후보로만 기록한다. 번역 테이블·다국어 동의어 DB·embedding·Vector DB·Concept graph·RAG·요약·Evidence scoring은 추가하지 않았다.

@@ -1,5 +1,5 @@
 /**
- * 처리용 구조 청크를 만든다. 청크는 지식 개념이나 사용자가 보는 Evidence가 아니다.
+ * 처리용 구조 청크를 만든다. 청크는 모델 입력을 제한하는 단위이며 사용자에게 보여주는 개념이 아니다.
  * 기존 Markdown 블록 추출을 사용하고 큰 블록만 추가 분할한다. 원문은 수정하지 않는다.
  * 반환하는 모든 블록의 offset은 전체 원문 기준이므로 청크별 응답을 안전하게 합칠 수 있다.
  */
@@ -58,7 +58,7 @@ export function structuralChunks(text: string): { blocks: Block[]; chunks: Struc
         const heading = block.text.match(/^ {0,3}(#{1,6})\s*(.*)/);
         if (heading) { context = context.slice(0, heading[1].length - 1); context[heading[1].length - 1] = block.text; }
       }
-      // 앞 청크에서 시작한 섹션의 Heading도 맥락으로 제공한다. Evidence로 선택할 ID는 본문 블록만 제공한다.
+      // 앞 청크에서 시작한 섹션의 Heading도 맥락으로 제공한다. 처리 블록은 청크 본문으로 한정한다.
       if (!current.length) currentContext = context.filter(Boolean);
       current.push(block); bytes += size;
     }

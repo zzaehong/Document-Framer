@@ -26,8 +26,8 @@ function harness() {
   let responder = async (request: HttpRequest): Promise<HttpResponse> => {
     const input = JSON.parse(JSON.parse(request.body).contents[0].parts[0].text);
     return { status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({
-      domains: [{ path: ['Other'], source: 'unclassified', confidence: 0.3 }], type: { id: 'idea-note', confidence: 0.6 },
-      concepts: [{ concept: 'Reusable concept', confidence: 0.7, evidence: input.blocks.map((b: any) => ({ blockIds: [b.id], labels: [{ id: 'idea', confidence: 0.5 }] })) }],
+      domains: [{ path: ['Other'], source: 'unclassified', confidence: 0.3 }], contentNature: { id: 'opinion', confidence: 0.6 },
+      concepts: [{ concept: 'Reusable concept', confidence: 0.7 }],
     }) }] } }] }) };
   };
   class Element {
@@ -95,7 +95,7 @@ test('late success/failure cannot restore previews or statuses after delete, ren
     if (change === 'return') { h.file.path = 'test.md'; h.vaultEvents.rename(h.file, 'moved.md'); }
     if (change === 'delete') plugin.app.vault.getAbstractFileByPath = () => null;
     if (change === 'reuse') plugin.app.vault.getAbstractFileByPath = () => ({ ...h.file });
-    finish(success ? { status: 200, text: JSON.stringify({ usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 }, candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: [{ path: ['Other'], source: 'unclassified', confidence: 0 }], type: { id: 'idea-note', confidence: 0 }, concepts: [{ concept: 'Reusable concept', confidence: 0.7, evidence: [{ blockIds: ['b1', 'b2'], labels: [{ id: 'idea', confidence: 0 }] }] }] }) }] } }] }) } : { status: 403, text: '' });
+    finish(success ? { status: 200, text: JSON.stringify({ usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 }, candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: [{ path: ['Other'], source: 'unclassified', confidence: 0 }], contentNature: { id: 'opinion', confidence: 0 }, concepts: [{ concept: 'Reusable concept', confidence: 0.7 }] }) }] } }] }) } : { status: 403, text: '' });
     await pending;
     assert.equal(plugin.previews.has('test.md'), false, change);
     assert.equal(plugin.previewStatuses.has('test.md'), false, change);
@@ -135,6 +135,9 @@ test('settings UI saves, reloads, checks and deletes key without placing it in d
   await plugin.request(); h.advance(60_000); await plugin.tick();
   const frame = JSON.stringify(plugin.frames['test.md']);
   h.settingsTab.display();
+  const settingsText = descendants(h.settingsTab.containerEl).map(el => el.text).join('\n');
+  assert.ok(settingsText.includes('일시 오류 재시도 최대 2회'));
+  assert.ok(settingsText.includes('최대 102회 전송'));
   const keySetting = h.settings.find(s => s.name === 'Gemini API 키');
   keySetting.text.setValue('dummy-secret');
   await keySetting.buttons.find((b: any) => b.text === '저장').click();
@@ -174,7 +177,7 @@ test('Gemini request respects stability and duplicate clicks; preview never upda
   const elements = (el: any): any[] => [el, ...el.children.flatMap(elements)];
   const shown = elements(h.modals[0].contentEl).map(el => el.text);
   assert.ok(shown.includes('Gemini Frame 검토'));
-  assert.ok(shown.includes(h.content));
+  assert.ok(!shown.includes(h.content));
   assert.ok(shown.some(text => text.includes('재시작하면 사라지며')));
   const before = preview;
   h.respond(async () => ({ status: 403, text: 'dummy-secret' }));
@@ -256,7 +259,7 @@ test('restarted plugin shows unresolved request, requires explicit risk acknowle
   assert.equal(JSON.stringify(h.saved), acknowledged);
   h.respond(async request => {
     const blocks = JSON.parse(JSON.parse(request.body).contents[0].parts[0].text).blocks;
-    return { status: 200, text: JSON.stringify({ usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 10, totalTokenCount: 30 }, modelVersion: 'gemini-3.1-flash-lite', candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: [{ path: ['Other'], source: 'unclassified', confidence: 0 }], type: { id: 'idea-note', confidence: 0 }, concepts: [{ concept: 'Reusable concept', confidence: 0.7, evidence: [{ blockIds: blocks.map((b: any) => b.id), labels: [{ id: 'idea', confidence: 0 }] }] }] }) }] } }] }) };
+    return { status: 200, text: JSON.stringify({ usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 10, totalTokenCount: 30 }, modelVersion: 'gemini-3.1-flash-lite', candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: [{ path: ['Other'], source: 'unclassified', confidence: 0 }], contentNature: { id: 'opinion', confidence: 0 }, concepts: [{ concept: 'Reusable concept', confidence: 0.7 }] }) }] } }] }) };
   });
   await next.request(true);
   assert.equal(h.requests.length, 2); assert.equal(next.previews.size, 1);
@@ -286,7 +289,7 @@ test('new file at reused path can request while old HTTP is pending without old 
   finish({ status: 403, text: '' }); await pending;
   assert.equal(plugin.previewStatuses.has('test.md'), false);
   assert.equal(plugin.previewQueue.pending('test.md'), true);
-  h.respond(async () => ({ status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: [{ path: ['Other'], source: 'unclassified', confidence: 0 }], type: { id: 'idea-note', confidence: 0 }, concepts: [{ concept: 'Reusable concept', confidence: 0.7, evidence: [{ blockIds: ['b1'], labels: [{ id: 'idea', confidence: 0 }] }] }] }) }] } }] }) }));
+  h.respond(async () => ({ status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: [{ path: ['Other'], source: 'unclassified', confidence: 0 }], contentNature: { id: 'opinion', confidence: 0 }, concepts: [{ concept: 'Reusable concept', confidence: 0.7 }] }) }] } }] }) }));
   await plugin.tick();
   assert.equal(plugin.previews.get('test.md').sourceText, '새 파일');
   assert.equal(h.requests.length, 2);
@@ -298,7 +301,7 @@ const jsonCopy = (value: unknown) => JSON.parse(JSON.stringify(value));
 function domainResponder(domains: unknown[]) {
   return async (request: HttpRequest): Promise<HttpResponse> => {
     const input = JSON.parse(JSON.parse(request.body).contents[0].parts[0].text);
-    return { status: 200, text: JSON.stringify({ modelVersion: 'gemini-3.1-flash-lite-001', candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains, type: { id: 'informational', confidence: 0.83 }, concepts: [{ concept: 'Reusable concept', confidence: 0.7, evidence: [{ blockIds: input.blocks.map((b: any) => b.id), labels: [{ id: 'claim', confidence: 0.72 }, { id: 'evidence', confidence: 0.64 }] }] }] }) }] } }] }) };
+    return { status: 200, text: JSON.stringify({ modelVersion: 'gemini-3.1-flash-lite-001', candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains, contentNature: { id: 'information', confidence: 0.83 }, concepts: [{ concept: 'Reusable concept', confidence: 0.7 }] }) }] } }] }) };
   };
 }
 const economicsCandidate = [{ path: ['Economics'], source: 'new', confidence: 0.91 }];
@@ -314,12 +317,14 @@ test('AC-B/C/F/G: structured review approves only the chosen candidate and reuse
   plugin.showPreview(h.file.path);
   const modal = h.modals.at(-1);
   const visible = descendants(modal.contentEl, false).map(el => el.text).join('\n');
-  for (const text of ['Domain', 'Economics', 'Science → Biology → Genetics', '새 Domain 후보', 'Document Type', 'informational', 'Key Concepts', 'Reusable concept', 'Evidence · 1~2행', 'claim · evidence', original]) assert.ok(visible.includes(text), text);
-  for (const text of ['confidence', '0.91', '0.83', preview.frame.evaluation.runId, 'gemini-3.1-flash-lite-001', 'concept-extraction-v1', 'schemaVersion']) assert.ok(!visible.includes(text), text);
+  assert.ok(!visible.includes('Evidence'));
+  assert.ok(!visible.includes(original));
+  for (const text of ['Domain', 'Economics', 'Science → Biology → Genetics', '새 Domain 후보', 'Content Nature', '정보', 'Key Concepts', 'Reusable concept']) assert.ok(visible.includes(text), text);
+  for (const text of ['confidence', '0.91', '0.83', preview.frame.evaluation.runId, 'gemini-3.1-flash-lite-001', 'concept-extraction-v2', 'schemaVersion']) assert.ok(!visible.includes(text), text);
   const details = descendants(modal.contentEl).find(el => el.tag === 'details');
   assert.equal(details.open, false);
   const developer = descendants(details).map(el => el.text).join('\n');
-  for (const text of ['Developer Details', 'confidence', '0.91', preview.frame.evaluation.runId, 'gemini-3.1-flash-lite-001', 'concept-extraction-v1', 'concept-extraction-schema-v1', 'domainCatalogHash']) assert.ok(developer.includes(text), text);
+  for (const text of ['Developer Details', 'confidence', '0.91', preview.frame.evaluation.runId, 'gemini-3.1-flash-lite-001', 'concept-extraction-v2', 'concept-extraction-schema-v2', 'domainCatalogHash']) assert.ok(developer.includes(text), text);
   const approve = descendants(modal.contentEl).find(el => el.text === '승인');
   approve.onclick();
   await waitFor(() => plugin.store.getDomains().length === 1);
@@ -431,7 +436,7 @@ test('partial long-document failure keeps previous preview and its human highlig
   let calls = 0;
   h.respond(async () => {
     if (++calls === 2) return { status: 403, text: '{}' };
-    return { status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: economicsCandidate, type: { id: 'informational', confidence: 0.8 }, concepts: [] }) }] } }] }) };
+    return { status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: economicsCandidate, contentNature: { id: 'information', confidence: 0.8 }, concepts: [] }) }] } }] }) };
   });
   await plugin.request(true); h.advance(60_000); await plugin.tick();
   assert.equal(calls, 2); assert.equal(plugin.previews.get(h.file.path), before);
@@ -442,9 +447,22 @@ test('partial long-document failure keeps previous preview and its human highlig
 test('zero Concept review explicitly reports no extracted knowledge without hiding original document', async () => {
   const h = harness(); const plugin = h.create(); await plugin.onload(); plugin.key.save('key'); h.advance(60_000);
   const original = h.content;
-  h.respond(async () => ({ status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: [{ path: ['Other'], source: 'unclassified', confidence: 0 }], type: { id: 'unclassified', confidence: 0 }, concepts: [] }) }] } }] }) }));
+  h.respond(async () => ({ status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: [{ path: ['Other'], source: 'unclassified', confidence: 0 }], contentNature: { id: 'unclassified', confidence: 0 }, concepts: [] }) }] } }] }) }));
   await plugin.request(true); plugin.showPreview(h.file.path);
   const visible = descendants(h.modals.at(-1).contentEl, false).map(el => el.text).join('\n');
   assert.match(visible, /핵심 개념을 찾지 못했습니다/); assert.equal(h.content, original);
   assert.equal(plugin.previews.get(h.file.path).frame.concepts.length, 0);
+});
+
+// 기본 화면은 한국어 성격만 표시하며 enum/confidence는 접힌 개발 정보에 둔다.
+test('Content Nature review displays all four Korean names without raw enum or evidence', async () => {
+  for (const [id, label] of [['information', '정보'], ['opinion', '의견'], ['mixed', '정보 + 의견'], ['unclassified', '분류 어려움']]) {
+    const h = harness(); const plugin = h.create(); await plugin.onload(); plugin.key.save('key'); h.advance(60_000);
+    h.respond(async () => ({ status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: economicsCandidate, contentNature: { id, confidence: 0.87 }, concepts: [{ concept: '분산투자', confidence: 0.9 }] }) }] } }] }) }));
+    await plugin.request(true); plugin.showPreview(h.file.path);
+    const visible = descendants(h.modals.at(-1).contentEl, false).map(el => el.text).join('\n');
+    assert.ok(visible.includes(label)); assert.ok(visible.includes('분산투자'));
+    for (const hidden of [id, 'Evidence', 'confidence', '0.87', 'Document Type', h.content]) assert.ok(!visible.includes(hidden), hidden);
+    plugin.onunload();
+  }
 });

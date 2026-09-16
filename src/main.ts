@@ -1,3 +1,4 @@
+import { CONTENT_NATURE_NAMES } from './classification';
 /**
  * 플러그인의 진입점이자 연결 담당: Obsidian 이벤트, 처리 큐, 엔진, 저장소와 화면을 연결한다.
  * 읽는 순서: onload() 등록 → request() 수동 요청 → tick() 대기 확인 및 처리 → 패널/모달 표시.
@@ -283,7 +284,7 @@ class PreviewModal extends Modal {
   private render() {
     this.contentEl.empty();
     this.contentEl.addClass('document-framer');
-    const { frame, sourceText } = this.preview;
+    const { frame } = this.preview;
     this.contentEl.createEl('h2', { text: 'Gemini Frame 검토' });
     this.contentEl.createEl('p', { text: frame.document.path });
     this.contentEl.createEl('p', { text: '요청 당시 원문 기준입니다. 현재 편집 내용과 다를 수 있습니다. 미리보기는 재시작하면 사라지며 승인한 Domain만 이후 분류에 사용됩니다.' });
@@ -312,10 +313,10 @@ class PreviewModal extends Modal {
       }
     }
     if (this.message) this.contentEl.createEl('p', { text: this.message, attr: { role: 'status' } });
-    this.contentEl.createEl('h3', { text: 'Document Type' });
-    this.contentEl.createEl('p', { text: frame.document.type.id });
+    this.contentEl.createEl('h3', { text: 'Content Nature' });
+    this.contentEl.createEl('p', { text: CONTENT_NATURE_NAMES[frame.document.contentNature.id] });
     this.contentEl.createEl('h3', { text: 'Key Concepts' });
-    this.contentEl.createEl('p', { text: '핵심 개념을 뒷받침하는 원문만 표시합니다. 포함되지 않은 내용도 원문에 보존됩니다. 중요 표시는 이 미리보기에서만 유지됩니다.' });
+    this.contentEl.createEl('p', { text: '문서의 핵심 개념 색인입니다. 중요 표시는 이 미리보기에서만 유지됩니다.' });
     if (!frame.concepts.length) this.contentEl.createEl('p', { text: '재사용할 핵심 개념을 찾지 못했습니다. 원문은 그대로 보존됩니다.' });
     for (const concept of frame.concepts) {
       const section = this.contentEl.createEl('section');
@@ -326,11 +327,7 @@ class PreviewModal extends Modal {
         if (this.plugin.previews.get(frame.document.path) !== this.preview) return;
         concept.highlight = !concept.highlight; this.render();
       };
-      for (const evidence of concept.evidence) {
-        section.createEl('p', { text: `Evidence · ${evidence.startLine}~${evidence.endLine}행` });
-        section.createEl('p', { text: evidence.labels.map(a => a.id).join(' · ') });
-        section.createEl('pre').createEl('code', { text: sourceText.slice(evidence.startOffset, evidence.endOffset) });
-      }
+
     }
     // 개발 정보는 기본으로 접는다. confidence는 원래 Frame 안에 보존한다.
     const details = this.contentEl.createEl('details');

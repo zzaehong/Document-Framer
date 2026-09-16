@@ -6,10 +6,10 @@ import { validateExtraction } from '../src/concepts';
 import { BUDGET } from '../src/budget';
 import { GeminiFramer } from '../src/framing';
 import { GeminiClient, HttpRequest } from '../src/gemini';
-const valid = (ids = ['b1', 'b2']) => ({
+const valid = () => ({
   domains: [{ path: ['Engineering', 'Computer Science', 'Artificial Intelligence'], source: 'new', confidence: 0.8 }, { path: ['Business'], source: 'new', confidence: 0.4 }],
-  type: { id: 'prose-with-decision', confidence: 0.9 },
-  concepts: [{ concept: 'Architectural Decision', confidence: 0.8, evidence: [{ blockIds: ids, labels: [{ id: 'observation', confidence: 0.7 }, { id: 'decision', confidence: 0.9 }] }] }],
+  contentNature: { id: 'opinion', confidence: 0.9 },
+  concepts: [{ concept: 'Architectural Decision', confidence: 0.8 }],
 });
 // 여러 Markdown 요소와 한글·이모지·CRLF에서도 블록의 원문 범위가 정확한지 확인한다.
 test('blocks retain exact CRLF and Unicode offsets across headings, lists, quotes, tables and fences', () => {
@@ -31,26 +31,17 @@ test('empty, malformed Markdown and unclosed fences retain readable content with
     assert.equal(blocks.at(-1)?.source.endOffset, text.length);
   }
 });
-// Label/Type/원문 참조 회귀를 새 Evidence 계약에서 확인한다. 원문 미선택은 이제 정상이다.
-test('extraction rejects invalid labels, confidence, unknown references and forged source fields', () => {
-  const blocks = extractBlocks('# 제목\n\n결정 내용');
+// 폐기한 Type 및 생성 요약 등 추가 필드를 새 분류 계약이 받아들이지 않는지 확인한다.
+test('extraction rejects invalid nature, confidence and unexpected generated fields', () => {
   const mutations: ((v: any) => void)[] = [
-    v => { v.type.id = 'summary'; }, v => { v.type.confidence = NaN; },
-    v => { v.concepts[0].evidence[0].labels[0].id = 'new'; },
-    v => { v.concepts[0].evidence[0].labels = []; },
-    v => { v.concepts[0].evidence[0].labels.push({ id: 'unclassified', confidence: 0 }); },
-    v => { v.concepts[0].evidence[0].startLine = 999; },
-    v => { v.concepts[0].evidence[0].text = 'AI summary'; },
-    v => { v.concepts[0].evidence[0].blockIds = ['b2', 'b1']; },
-    v => { v.concepts[0].evidence[0].blockIds = ['b1', 'b1']; },
-    v => { v.concepts[0].evidence[0].blockIds = ['b1', 'b99']; },
-    v => { v.concepts[0].evidence = []; }, v => { delete v.type; },
+    v => { v.contentNature.id = 'informational'; }, v => { v.contentNature.confidence = NaN; },
+    v => { v.concepts[0].summary = 'AI summary'; }, v => { v.type = v.contentNature; },
+    v => { delete v.contentNature; },
   ];
-  for (const mutate of mutations) { const value = valid(); mutate(value); assert.throws(() => validateExtraction(value, blocks, [], 'chunk-1'), /검증 실패/); }
-  assert.equal(validateExtraction(valid(['b2']), blocks, [], 'chunk-1').concepts[0].evidence[0].startLine, 3);
+  for (const mutate of mutations) { const value = valid(); mutate(value); assert.throws(() => validateExtraction(value, [], 'chunk-1'), /검증 실패/); }
 });
 
-test('short document uses one extraction call and constructs local concept evidence', async () => {
+test('short document uses one extraction call and constructs minimal concept metadata', async () => {
   const requests: HttpRequest[] = [];
   const framer = new GeminiFramer(new GeminiClient(async request => {
     requests.push(request);
@@ -62,14 +53,14 @@ test('short document uses one extraction call and constructs local concept evide
   assert.equal(requests.length, 1); assert.deepEqual(source, before);
   assert.ok(!requests[0].body.includes(source.path));
   const sent = JSON.parse(JSON.parse(requests[0].body).contents[0].parts[0].text);
-  assert.deepEqual(Object.keys(sent.blocks[0]), ['id', 'kind', 'text']);
+  assert.deepEqual(Object.keys(sent.blocks[0]), ['kind', 'text']);
   assert.equal(preview.frame.document.createdAt, 123);
   assert.equal(preview.frame.document.title, '제목 😀');
-  assert.equal(preview.frame.concepts[0].evidence[0].endOffset, source.text.length);
+  assert.deepEqual(Object.keys(preview.frame.concepts[0]), ['id', 'concept', 'confidence', 'highlight']);
   assert.equal(preview.frame.previewOnly, true);
   assert.equal(preview.frame.document.importance, null);
   assert.equal(preview.frame.concepts[0].highlight, false);
-  assert.equal(preview.frame.schemaVersion, 4);
+  assert.equal(preview.frame.schemaVersion, 5);
   assert.ok(!('knowledgeUnits' in preview.frame));
 });
 
