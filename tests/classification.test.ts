@@ -13,9 +13,9 @@ const valid = () => ({
 });
 // 여러 Markdown 요소와 한글·이모지·CRLF에서도 블록의 원문 범위가 정확한지 확인한다.
 test('blocks retain exact CRLF and Unicode offsets across headings, lists, quotes, tables and fences', () => {
-  const text = '\uFEFF---\r\ntitle: 테스트\r\n---\r\n\r\n# 제목 😀\r\n\r\n- 하나\r\n  - 둘\r\n\r\n> 인용\r\n> 계속\r\n\r\n| A | B |\r\n| - | - |\r\n| 1 | 2 |\r\n\r\n````md\r\n# 코드\r\n\r\n```\r\n````\r\n\r\n마지막';
+  const text = '\uFEFF---\r\ntitle: 테스트\r\n---\r\n\r\n# 제목 😀\r\n\r\n- 하나\r\n  - 둘\r\n\r\n> 인용\r\n> 계속\r\n\r\n| A | B |\r\n| --- | --- |\r\n| 1 | 2 |\r\n\r\n````md\r\n# 코드\r\n\r\n```\r\n````\r\n\r\n마지막';
   const blocks = extractBlocks(text);
-  assert.deepEqual(blocks.map(b => b.kind), ['frontmatter', 'heading', 'text', 'text', 'text', 'code', 'text']);
+  assert.deepEqual(blocks.map(b => b.kind), ['frontmatter', 'heading', 'list', 'blockquote', 'table', 'code', 'paragraph']);
   assert.deepEqual(blocks.map(b => [b.source.startLine, b.source.endLine]), [[1, 3], [5, 5], [7, 8], [10, 11], [13, 15], [17, 21], [23, 23]]);
   for (const block of blocks) assert.equal(text.slice(block.source.startOffset, block.source.endOffset), block.text);
   assert.equal(blocks.at(-1)?.source.endOffset, text.length);
@@ -53,7 +53,8 @@ test('short document uses one extraction call and constructs minimal concept met
   assert.equal(requests.length, 1); assert.deepEqual(source, before);
   assert.ok(!requests[0].body.includes(source.path));
   const sent = JSON.parse(JSON.parse(requests[0].body).contents[0].parts[0].text);
-  assert.deepEqual(Object.keys(sent.blocks[0]), ['kind', 'text']);
+  assert.equal(sent.contextMarkdown, source.text);
+  assert.deepEqual(sent.frontmatterRanges, []);
   assert.equal(preview.frame.document.createdAt, 123);
   assert.equal(preview.frame.document.title, '제목 😀');
   assert.deepEqual(Object.keys(preview.frame.concepts[0]), ['id', 'concept', 'confidence', 'highlight']);
@@ -67,8 +68,22 @@ test('short document uses one extraction call and constructs minimal concept met
 test('empty and over-budget documents fail before network; malformed extraction never gets repair call', async () => {
   let calls = 0;
   const framer = new GeminiFramer(new GeminiClient(async () => { calls++; return { status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '{}' }] } }] }) }; }));
-  for (const text of ['', 'x'.repeat(BUDGET.maxDocumentBytes + 1), '# h\n'.repeat(BUDGET.maxBlocksPerChunk * BUDGET.maxChunks + 1)]) await assert.rejects(framer.generate({ path: 'a', basename: 'a', ctime: 0, mtime: 0, text }, 'key'));
+  for (const text of ['', '```\n' + 'x'.repeat(BUDGET.maxChunkBytes + 1) + '\n```', 'x'.repeat(BUDGET.maxDocumentBytes + 1), '# h\n'.repeat(BUDGET.maxBlocksPerChunk * BUDGET.maxChunks + 1)]) await assert.rejects(framer.generate({ path: 'a', basename: 'a', ctime: 0, mtime: 0, text }, 'key'));
   assert.equal(calls, 0);
   await assert.rejects(framer.generate({ path: 'a', basename: 'a', ctime: 0, mtime: 0, text: 'body' }, 'key'), /검증 실패/);
   assert.equal(calls, 1);
+});
+
+test('Gemini receives Markdown context with frontmatter ranges but no grounding classification signals', async () => {
+  const text = '---\nsource: book\n---\n\n일반 본문이다.';
+  const preview = await new GeminiFramer(new GeminiClient(async request => {
+    const input = JSON.parse(JSON.parse(request.body).contents[0].parts[0].text);
+    assert.deepEqual(Object.keys(input), ['existingDomains', 'contextMarkdown', 'frontmatterRanges']);
+    assert.equal(input.contextMarkdown, text);
+    assert.equal(input.frontmatterRanges.length, 1);
+    const range = input.frontmatterRanges[0];
+    assert.equal(input.contextMarkdown.slice(range.startOffset, range.endOffset), '---\nsource: book\n---\n');
+    return { status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(valid()) }] } }] }) };
+  })).generate({ path: 'a.md', basename: 'a', ctime: 0, mtime: 0, text }, 'key');
+  assert.equal(preview.frame.schemaVersion, 5);
 });

@@ -3,7 +3,7 @@
  * 청크를 16 KiB로 제한하여 한 응답에서 최대 16개 개념을 검토하도록 한다.
  * 실제 모델 품질을 측정하면 이 파일의 값과 PIPELINE_VERSION을 함께 갱신한다.
  */
-export const PIPELINE_VERSION = 'concept-pipeline-v2';
+export const PIPELINE_VERSION = 'concept-pipeline-v3';
 // 논리 호출과 HTTP 전송 예산이 어긋나지 않도록 transport와 UI가 같은 상수를 사용한다.
 export const MAX_HTTP_ATTEMPTS = 3;
 export const RETRY_BASE_MS = 1500;

@@ -1,3 +1,5 @@
+> Phase 1 입력 구성은 최신 [Markdown-aware 구조 설계](Phase1_Structural.md)로 교체되었다. 아래 기록의 TEST_ONLY/old structuralChunks는 역사이며 Phase 2의 현재 의미 계약은 2S를 유지한다.
+
 > 현재 구현은 문서 끝의 **2S Framing Core 단순화**다. 앞부분의 Type/Unit/Label/Evidence와 retry·예산·테스트 수는 해당 시점의 역사적 기록이다.
 
 # 2단계 구현 기록 · Gemini 분류 미리보기
@@ -216,3 +218,7 @@ Highlight는 미리보기의 사용자 선택이며 메모리에서만 유지한
 ### Change Candidates — 구현 제외
 
 Retry-After 기반 429 처리, Decision/Idea signals, 실패 청크 재개/중간 캐시, 통합 결과 사용자 되돌리기는 후속 후보로만 기록한다. 번역 테이블·다국어 동의어 DB·embedding·Vector DB·Concept graph·RAG·요약·Evidence scoring은 추가하지 않았다.
+
+## Phase 1 구조 기반 입력 연결
+
+로컬 Structural Frame 6과 buildContextUnits를 통해 Gemini 입력을 구성한다. 출력은 기존 Gemini schema 5이며 Domain/Content Nature/Concept 정책은 바꾸지 않았다. 입력 필드는 contextMarkdown과 frontmatterRanges로 변경했고 추출 prompt v3는 입력 설명만 갱신했다. 추출 schema v2·문서 분류 prompt/schema v4·통합 prompt v2·retry/생성 설정은 유지한다. pipeline v3, markdown-blocks-v2, markdown-structure-v1, section-context-v1 및 contextUnitId/sectionId를 trace에서 확인할 수 있다. Context 생성/예산 검증은 첫 HTTP 전에 끝낸다.

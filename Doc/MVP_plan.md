@@ -1,10 +1,10 @@
 ## MVP 개발 단계별 목표
 
-현재 범위: 1단계 로컬 테스트, 2단계 Domain lifecycle, 2S Framing Core 단순화 **별도 미리보기**. 설정·키 관리·저장 호환·승인 Catalog·신규 후보 검토·검증 범위는 [2단계 구현 기록](MVP_phase2.md)에 정리했다. 실제 결과의 활성 Frame 갱신과 후속 단계는 제외한다.
+현재 범위: 1R Markdown 구조 Framing, 2단계 Domain lifecycle, 2S Framing Core 단순화 **별도 미리보기**. 설정·키 관리·저장 호환·승인 Catalog·신규 후보 검토·검증 범위는 [2단계 구현 기록](MVP_phase2.md)에 정리했다. 실제 결과의 활성 Frame 갱신과 후속 단계는 제외한다.
 
 | 단계                   | 사용자가 확인할 결과                                 | 작은 개발 작업                                                  | 관련 FR               |
 | -------------------- | ------------------------------------------- | --------------------------------------------------------- | ------------------- |
-| **1. 수동 처리의 기본 흐름**  | 현재 문서에서 버튼을 누르면 대기 후 테스트 결과가 저장되고 표시됨       | 플러그인 실행 → 원문 읽기 → 요청·60초 대기 → 테스트 엔진 → 저장·조회              | 01~03, 09~11, 19 일부 |
+| **1. 수동 처리의 기본 흐름**  | 현재 문서에서 버튼을 누르면 대기 후 구조 결과가 저장되고 표시됨       | 플러그인 실행 → 원문 읽기 → 요청·60초 대기 → 구조 파서 → Structural Frame 저장·조회              | 01~03, 09~11, 19 일부 |
 | **2. 실제 AI Framing** | Domain 재사용·신규 후보 승인과 Type·Unit·Label을 구조화된 Review에서 확인    | 독립 Prompt → 승인 Catalog 입력 → 분류 검증 → Review → 후보 승인 저장                  | 04~08, 15           |
 | **2R. Concept-based Framing revision** | 긴 문서를 개념과 여러 원문 근거로 검토 | 구조 청크 → 선택적 추출 → 중복 통합 → Concept Review | 06~09, 13 |
 | **2S. Framing Core 단순화** | Domain·Content Nature·원문 언어 Key Concepts 검토 | Evidence/Label 제거 → schema 5 → prompt/UI → 3 attempts/backoff → 검증 | 05~09, 11, 13 |
@@ -42,3 +42,11 @@ Evidence linking은 2R에서 시험했으나 문서 전체 개념의 넓은 근�
 Domain lifecycle·구조 청크·사용량·timeout 복구·SecretStorage·기존 저장 Frame은 유지한다. Gemini 결과는 메모리 미리보기이며 활성 Frame 저장, 전체 correction, Safe Reframing은 후속이다. 실제 데이터 조사: checkout의 테스트 Vault에는 data.json이 없으며 저장 코드는 로컬 schema 1 Frame만 생성한다. 외부 Vault는 이번 조사 범위가 아니다. 강제 migration을 하지 않는다.
 
 2S 구현 결과: schema 5·Content Nature·원문 언어 개념 색인·Evidence/Label 제거·3 attempts/backoff·102 HTTP 상한·Review를 반영했다. `npm test` 82개, `npm run build`, `git diff --check`가 통과했다. 실제 모델 품질 및 Obsidian GUI 검수는 README 절차로 별도 확인한다. 2R의 67개 테스트와 설계는 이전 이력이다.
+
+## 1R Markdown-aware Phase 1 revision
+
+앞선 local-test-v1은 이력으로 보존한다. 현재는 schema 6/local-structural-v1과 Section Tree·구조 블록·관찰 통계를 저장하고 Context Builder로 Phase 2 입력을 만든다. 구현 순서는 source 검토 → structural model/parser/tree/blocks/stats → local engine → Section-first Context → Gemini 연결 → UI → tests/docs/build다.
+
+수동 안정 대기·저장·Domain·Concept·Content Nature·503/timeout/Journal은 유지한다. 모델의 Content Nature 정확도 개선, Grounding-aware 분류, 새 Human Review, candidate budget 개선은 이번 revision에 포함하지 않는다. 저장 artifact와 AI Context는 분리한다.
+
+1R 검증 결과: `npm test` 103개 통과, `npm run test:vault`(TypeScript/build 포함) 및 `git diff --check` 통과. 실제 PRD 1,002줄/58,472 bytes는 24 Context로 생성하며 source coverage를 검증했다. 설계/제약/검증 재현은 [Phase1_Structural.md](Phase1_Structural.md)에 기록했다.

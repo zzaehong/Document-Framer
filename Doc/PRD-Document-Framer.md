@@ -1,5 +1,5 @@
 > **Status:** Draft / Specification  
-> **Version:** 0.7
+> **Version:** 0.8
 > **Project:** Document Framer  
 > **Timebox:** 10 days  
 > **Workflow Stage:** Step 2 — Specify Observable Behavior
@@ -8,9 +8,9 @@
 
 # 1. Purpose
 
-Document Framer는 사용자가 Obsidian에 자유롭게 축적한 비정형 Markdown 문서를 자동으로 분석하여, 원문을 변경하지 않고 AI가 이후 활용할 수 있는 구조화된 Frame을 생성하는 최소 semantic metadata 생성 시스템이다.
+Document Framer는 사용자가 Obsidian에 자유롭게 축적한 비정형 Markdown 문서를 자동으로 분석하여, 원문을 변경하지 않고 AI가 이후 활용할 수 있는 구조화된 Frame을 생성하는 Markdown 구조 관찰과 최소 semantic metadata 생성을 분리한 시스템이다.
 
-Frame은 WHERE(Domain), WHAT KIND(Content Nature), WHAT ABOUT(Key Concepts)에 답한다. Markdown을 재구성하거나 요약하지 않는다.
+Phase 1은 저장 가능한 Structural Frame을 만들고 Phase 2 의미 Frame은 WHERE(Domain), WHAT KIND(Content Nature), WHAT ABOUT(Key Concepts)에 답한다. Markdown을 재구성하거나 요약하지 않는다.
 
 사용자는 AI 활용을 위해 별도의 metadata, taxonomy 또는 문서 형식을 관리할 필요가 없어야 한다.
 
@@ -282,7 +282,7 @@ Reframing은 Raw Markdown을 수정하지 않는다.
 
 시스템은 LLM 호출 없이 추출할 수 있는 문서 정보를 자동으로 수집해야 한다.
 
-최소 metadata 범위는 Step 3에서 확정한다.
+Phase 1은 경로·제목·생성/수정 시각·UTF-8 크기·줄 수에 더해 Section Tree, 구조 블록 위치, 구조 통계와 Grounding Signals를 계산한다. sourceHash/hashEncoding으로 원문 버전을 식별한다. AI 호출이나 의미 추론은 하지 않는다.
 
 ---
 
@@ -302,7 +302,7 @@ Content Nature는 information(정보), opinion(의견), mixed(정보 + 의견), 
 
 ## FR-06 — Key Concept Extraction
 
-Heading → 문단/블록 → 크기 경계 순으로 결정론적 청크를 만들고 핵심 개념 이름을 추출한다. Heading만으로 개념을 강제하지 않는다. 개념 0개도 정상이다. NFC·대소문자·공백 정규화 중복은 로컬에서 병합하되 번역으로 동일성을 판정하지 않는다. 여러 청크의 의미 통합은 후보 표현과 언어를 보존한다. 필수 단계 실패는 완료로 공개하지 않는다.
+Phase 1 Context Builder가 Section 전체 → child Section → direct blocks 순으로 모델 입력을 만든 뒤 Phase 2가 핵심 개념 이름을 추출한다. 예산 안의 문단·목록·코드·표를 유지하고 과대한 문단만 문장/줄/Unicode 경계로 분할한다. 과대한 목록은 최상위 item을 우선하고 코드·표는 명시적으로 실패한다. Heading만으로 개념을 강제하지 않는다. 개념 0개도 정상이다. NFC·대소문자·공백 정규화 중복은 로컬에서 병합하되 번역으로 동일성을 판정하지 않는다. 여러 청크의 의미 통합은 후보 표현과 언어를 보존한다. 필수 단계 실패는 완료로 공개하지 않는다.
 
 ---
 
@@ -322,7 +322,7 @@ Confidence의 표현 방식과 threshold는 추후 결정한다.
 
 ## FR-09 — Frame Generation
 
-Gemini Frame schemaVersion은 5다. document는 결정론 metadata·domains·contentNature·importance를 가진다. concepts의 항목은 id·concept·confidence·highlight만 가진다. Evidence, blockIds, 행/offset, 역할 라벨, 원문 발췌, 요약은 Concept에 저장하지 않는다. 모든 필수 단계가 성공하면 0개 Concept도 정상이다. 현재는 previewOnly: true인 메모리 미리보기이며 활성 Frame 저장은 후속이다.
+로컬 Structural Frame은 schema 6 / local-structural-v1이며 structure·groundingSignals·semantic.status=not-run을 갖는다. 로컬에는 domains·contentNature·concepts·knowledgeUnits·confidence를 만들지 않는다. 원문 본문도 복제하지 않는다. Gemini Frame schemaVersion은 5다. document는 결정론 metadata·domains·contentNature·importance를 가진다. concepts의 항목은 id·concept·confidence·highlight만 가진다. Evidence, blockIds, 행/offset, 역할 라벨, 원문 발췌, 요약은 Concept에 저장하지 않는다. 모든 필수 단계가 성공하면 0개 Concept도 정상이다. 현재는 previewOnly: true인 메모리 미리보기이며 활성 Frame 저장은 후속이다.
 
 ---
 
@@ -330,13 +330,13 @@ Gemini Frame schemaVersion은 5다. document는 결정론 metadata·domains·con
 
 생성된 Frame은 원본 Markdown과 분리된 상태로 저장될 수 있어야 한다.
 
-저장 방식은 Technical Design 단계에서 결정한다.
+현재 local Structural Frame은 data.json v3의 frames에 저장한다. 구버전 결과는 legacy로 읽고 명시적 로컬 Framing 시 해당 문서만 교체한다. Gemini 미리보기는 메모리 전용이다.
 
 ---
 
 ## FR-11 — Frame Inspection
 
-기본 검토 화면은 Domain 경로·기존/신규 여부, 한국어 Content Nature, Concept 이름과 Highlight를 표시한다. 신규 Domain 승인·거절 흐름을 유지한다. Concept 아래 원문 발췌나 행 범위·라벨은 표시하지 않는다. confidence·JSON·모델·실행 버전은 접힌 Developer Details에 둔다. confidence는 모델 자기 평가이며 정확도 확률이 아니다.
+로컬 검토는 Document·Sections(headingPath/행/바이트)·Structural Stats·Grounding Signals·Semantic 미실행 상태를 표시한다. Gemini 기본 검토 화면은 Domain 경로·기존/신규 여부, 한국어 Content Nature, Concept 이름과 Highlight를 표시한다. 신규 Domain 승인·거절 흐름을 유지한다. Concept 아래 원문 발췌나 행 범위·라벨은 표시하지 않는다. confidence·JSON·모델·실행 버전은 접힌 Developer Details에 둔다. confidence는 모델 자기 평가이며 정확도 확률이 아니다.
 
 ---
 
@@ -973,3 +973,29 @@ Step 3에서는 OD-08~11 및 기존 Open Decisions를 해당 기능 구현 전�
 ## 변경 이력
 
 v0.6/2R은 Concept + Evidence 연결을 시험했다. 실사용에서 문서 전체에 걸친 개념의 Evidence가 지나치게 넓어지고 복잡도 대비 MVP 가치가 부족했다. v0.7/2S는 Evidence·Semantic Label을 의도적으로 제거하고 Domain + Content Nature + Key Concepts로 단순화한다. 기존 저장 Frame과 사용자 annotation은 변형하지 않는다. 새 미리보기 schema 5와 legacy 저장 결과를 구분한다. Safe Reframing·영구 사용자 수정·Clarification은 후속이다.
+
+## Phase 1 Structural revision — 최신 계약
+
+Phase 1은 Observation/Structure이고 Phase 2는 Interpretation/Semantics다. `Doc/Phase1_Structural.md`의 section subtree 범위·direct block membership·Context 정책을 따른다. 구조는 저장 artifact, Context Unit은 모델 실행 때 생성하는 임시 입력이다. 기존 TEST_ONLY Knowledge Unit을 새로 생성하지 않는다.
+
+### AC-34 — Heading/Block Observation
+
+같은 원문은 같은 Section Tree와 block 위치를 만든다. headingPath와 parentId/childIds를 통해 계층을 복원한다. code 내부 제목은 Section이 아니며 목록·인용·표·frontmatter를 문단과 구분한다. Heading이 없으면 root section을 사용한다.
+
+### AC-35 — Structure-first Context
+
+Section 전체가 wrapper 포함 예산 안이면 한 Context로 유지한다. 초과하면 child section, direct blocks, oversized 문단/목록 내부 경계 순으로 분해한다. 작은 인접 동급 section은 같은 부모 아래에서만 병합하고 서로 다른 H1 주제를 섞지 않는다.
+
+### AC-36 — Context Coverage / Atomicity
+
+sourceRanges는 원문 공백을 포함해 누락·중복·역순 없이 전체를 덮는다. 부모 제목 wrapper는 별도 context representation이며 원문을 수정하지 않는다. CRLF와 Unicode 문자를 손상시키지 않는다. 예산 안의 목록·코드·표는 분할하지 않는다. 과대한 코드·표·frontmatter는 무음 절단 없이 명시적 오류로 끝난다.
+
+### AC-37 — Observation Only
+
+로컬 Frame에 의미 분류 필드가 없다. 링크/footnote/인용/표/참고문헌 제목/source metadata 키는 deterministic 관찰값이며 Content Nature를 결정하지 않는다. 원문 해시가 다른 구조 Frame으로 Context를 만들면 실패한다.
+
+### AC-38 — Local Storage and Inspection
+
+API 키 없이 대기 후 local-structural-v1을 저장·재로드하고 Sections/통계/관찰 신호/미실행 상태를 조회한다. 기존 결과는 자동 변환하지 않는다. 삭제·이동·종료로 무효화된 비동기 구조 결과가 새로운 정상 결과로 게시되지 않는다.
+
+Content Nature 품질 개선, Grounding-aware AI 분류, 새로운 Human Review, 계층적 Concept 통합, 후보 예산 변경, AI semantic chunking은 이번 범위 밖이다.

@@ -20,6 +20,9 @@ export interface EvaluationTrace {
   framingRunId?: string;
   stage?: 'concept-extraction' | 'concept-consolidation' | 'document-classification';
   chunkId?: string;
+  contextUnitId?: string;
+  sectionId?: string;
+  structureVersion?: string;
   chunkerVersion?: string;
   pipelineVersion?: string;
   extractionPromptVersion?: string;

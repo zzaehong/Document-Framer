@@ -1,6 +1,6 @@
 # Document Framer
 
-Obsidian Markdown 원문을 보존하고 별도 Frame을 만드는 플러그인입니다. [MVP 계획](Doc/MVP_plan.md)의 **1단계 수동 테스트 흐름**과 **2단계 Gemini 미리보기와 2S Framing Core 단순화**을 구현했습니다. 실제 분류 결과의 활성 Frame 반영은 후속 범위입니다.
+Obsidian Markdown 원문을 보존하고 별도 Frame을 만드는 플러그인입니다. [MVP 계획](Doc/MVP_plan.md)의 **Phase 1 Markdown 구조 Framing**과 **Phase 2 Gemini 의미 분류 미리보기**를 구현했습니다. 실제 분류 결과의 활성 Frame 반영은 후속 범위입니다.
 
 ## 바로 테스트하기
 
@@ -15,7 +15,7 @@ npm run test:vault
 1. Obsidian의 **보관함 관리 → 폴더를 보관함으로 열기**에서 이 프로젝트의 `.test-vault` 폴더를 선택합니다. 숨김 폴더가 보이지 않으면 전체 경로를 입력합니다.
 2. 설정 → 커뮤니티 플러그인에서 제한 모드를 해제하고 **Document Framer**를 활성화합니다.
 3. `시작하기.md`를 열고 왼쪽 리본의 **현재 문서 Framing** 아이콘 또는 명령 팔레트의 **Document Framer: 현재 문서 Framing 요청**을 실행합니다.
-4. 오른쪽 패널에서 대기 상태와 저장된 결과를 확인합니다. 로컬 테스트 JSON은 접힌 Developer Details에서 볼 수 있습니다. 패널의 **현재 문서 Framing** 버튼으로도 요청할 수 있습니다.
+4. 오른쪽 패널에서 대기 상태와 저장된 결과를 확인합니다. 구조 Frame JSON은 접힌 Developer Details에서 볼 수 있습니다. 패널의 **현재 문서 Framing** 버튼으로도 요청할 수 있습니다.
 
 마지막 원문 변경 후 60초가 지나야 실행됩니다. 이미 60초 이상 지난 문서는 바로 실행됩니다. 새로 한 글자를 입력하고 버튼을 누르면 대기 흐름을 볼 수 있습니다. 대기 중 편집하면 다시 60초를 계산하고, 같은 내용의 저장은 대기를 늘리지 않습니다. 문서 열기나 저장만으로는 실행되지 않습니다. API 키와 네트워크 연결은 필요 없습니다.
 
@@ -34,7 +34,7 @@ npm run test:vault
 
 시간 초과 후 같은 세션에서는 실제 HTTP 종료까지 새 호출을 막습니다. 재시작 후에는 미해결 기록을 표시하며 자동 재전송하지 않습니다. 설정에서 **중복 처리·과금 가능성을 확인하고 새 요청 허용**을 누른 뒤 새 요청을 직접 선택할 수 있습니다. 로컬 종료나 확인 버튼은 원격 취소를 뜻하지 않습니다.
 
-짧은 문서는 1회 추출하고, 긴 문서는 구조 청크를 순서대로 처리합니다. 동시 HTTP 호출은 1개, 논리 호출별 일시 오류 재시도는 최대 2회입니다. 인증·사용량 오류나 응답 검증 실패는 자동 재시도하지 않습니다. 다른 모델로 자동 전환하지 않습니다. 현재 문서 예산은 512 KiB·32청크이며 청크당 16 KiB·64블록입니다. 최대 34회 요청(재시도 포함 102회 전송)이며 한도를 넘거나 중간 단계가 실패하면 전체 미리보기를 완료로 표시하지 않습니다. 세부 제안·제약과 공식 API 근거는 [2단계 구현 기록](Doc/MVP_phase2.md)을 참고하세요.
+한 섹션이 예산 안에 들어가면 전체를 유지하며, 긴 문서는 Section 우선 Context Unit을 순서대로 처리합니다. 서로 다른 H1 주제는 별도 Context로 처리합니다. 동시 HTTP 호출은 1개, 논리 호출별 일시 오류 재시도는 최대 2회입니다. 인증·사용량 오류나 응답 검증 실패는 자동 재시도하지 않습니다. 다른 모델로 자동 전환하지 않습니다. 현재 문서 예산은 512 KiB·32청크이며 청크당 16 KiB·64블록입니다. 최대 34회 요청(재시도 포함 102회 전송)이며 한도를 넘거나 중간 단계가 실패하면 전체 미리보기를 완료로 표시하지 않습니다. 세부 제안·제약과 공식 API 근거는 [2단계 구현 기록](Doc/MVP_phase2.md)을 참고하세요.
 
 ## 기존 Vault에 설치
 
@@ -50,8 +50,8 @@ npm run test:vault
 
 - Markdown 읽기: 활성 편집기의 현재 내용 우선, 그 외 Vault 읽기 API 사용.
 - 고정 60초 안정 대기와 문서별 수동 요청. 중복 클릭 병합, 실행 후 요청 소비.
-- 기계적 metadata: 경로, H1 또는 파일명 제목, 파일 생성·수정 시각(ms), UTF-8 바이트 수, 줄 수, ATX heading 목록(코드 블록 제외).
-- 테스트 엔진: 문서 전체를 하나의 테스트 Unit으로 표현. `engine: local-test-v1`, `TEST_ONLY` 라벨. 실제 Domain/Content Nature/Confidence는 빈 배열 또는 null로 표시.
+- 기계적 metadata: 경로, H1 또는 파일명 제목, 파일 생성·수정 시각(ms), UTF-8 바이트 수, 줄 수, 제목 계층·구조 블록·통계·관찰 신호(코드 내부 제목 제외).
+- 로컬 엔진: `local-structural-v1`, schema 6. Section Tree·구조 블록 위치·통계·Grounding Signals·원문 SHA-256을 저장합니다. `semantic.status: not-run`이며 의미 분류 필드나 원문 본문을 저장하지 않습니다.
 - 저장 위치: `<Vault 설정 폴더>/plugins/document-framer/data.json`. `version: 3`에 설정(모델·비밀 항목 ID), 기존 Frame, 독립적인 호출 시도 기록과 승인 Domain Catalog(`domains`)를 저장합니다. 키 값은 포함하지 않습니다. 기존 `version: 1/2`는 Frame과 과거 호출 기록을 보존하고 빈 Catalog로 읽으며 다음 저장 시 v3로 이전합니다. 고정 분야 목록을 자동 등록하거나 기존 Frame을 재분류하지 않습니다. 원문을 수정하지 않으며 재시작 후 **Frame 보기** 명령으로 다시 조회 가능합니다.
 - 빈 문서와 2 MiB 초과 입력은 오류 표시. 저장 실패 시 기존 메모리 결과를 유지하고 수동 재시도 가능.
 
@@ -76,7 +76,7 @@ npm run test:vault
 - 응답 경로는 1~3단계이며 multi-domain을 유지합니다. source는 `existing`, `new`, 또는 의미 판단 불가인 `unclassified`입니다. Other는 마지막 경우의 예약 표시이며 Catalog가 비었다는 이유로 사용하지 않습니다.
 - 실제 Catalog에 없는 existing, 대소문자만 바꾼 new, 빈/과도한 길이/중복/잘못된 계층은 거부합니다. 이름의 NFC·공백·대소문자 계약은 [Phase 2 revision](Doc/MVP_phase2.md#phase-2-revision--follow-up--domain-catalog--review-2026-09-15)에 있습니다.
 - 승인은 후보 하나를 Catalog에 추가하는 동작입니다. 전체 Frame 수용이나 classification 수정 기능은 아닙니다. 저장에 실패하면 미승인 상태를 유지하며 다시 시도할 수 있습니다.
-- 요청에는 `existingDomains`와 `blocks`를 전달합니다. 평가 기록에는 Catalog 전체 대신 해시·개수를 기록하고, 추가 전용 Catalog의 첫 N개 항목으로 당시 스냅샷을 검증할 수 있습니다. 문서 분류 프롬프트/응답 버전은 `document-classification-v4` / `document-classification-schema-v4`, 개념 추출은 `concept-extraction-v2` / `concept-extraction-schema-v2`, AI 미리보기 Frame은 `schemaVersion: 5`입니다. 로컬 저장 Frame의 schemaVersion 1은 유지합니다.
+- 요청에는 `existingDomains`, `contextMarkdown`, `frontmatterRanges`를 전달합니다. 부모 제목은 별도 wrapper로 복원하며 본문을 중복 전송하지 않습니다. 평가 기록에는 Catalog 전체 대신 해시·개수를 기록하고, 추가 전용 Catalog의 첫 N개 항목으로 당시 스냅샷을 검증할 수 있습니다. 문서 분류 프롬프트/응답 버전은 `document-classification-v4` / `document-classification-schema-v4`, 개념 추출은 `concept-extraction-v3` / `concept-extraction-schema-v2`, AI 미리보기 Frame은 `schemaVersion: 5`입니다. 로컬 Structural Frame은 schemaVersion 6이고 기존 schema 1은 Legacy로 보존합니다.
 
 ### Domain 변경 수동 검수
 
@@ -103,7 +103,7 @@ Markdown → 구조 청크 → 청크별 개념/성격 추출
          → 문서 Domain/Content Nature 집계 → Concept Frame 미리보기
 ```
 
-- Heading/문단 경계를 먼저 사용하고 큰 단일 블록은 줄 경계로 분할합니다. 긴 한 줄은 Unicode 문자 경계로 나눕니다. 작은 섹션은 인접 섹션과 합치며, 섹션 수가 예산을 넘으면 크기·블록 상한까지 다시 묶습니다.
+- 저장된 구조와 모델 입력은 분리합니다. 전체 Section → child Section → 블록 순으로 분해하고, 같은 부모의 작은 인접 Section만 예산까지 병합합니다. 큰 문단은 문장/줄/Unicode 경계, 큰 목록은 최상위 item 경계를 우선합니다. 큰 코드·표·frontmatter는 임의 분할하지 않고 오류로 알립니다.
 - 한 청크에는 Domain/Content Nature 판단도 함께 요청합니다. 여러 청크 문서는 모든 청크의 분류 신호·개념 이름·본문 크기로 최종 문서 분류를 한 번 결정합니다. 이 집계에는 원문 전체를 재전송하지 않습니다.
 - 동일 NFC/대소문자/공백 정규화 이름은 로컬에서 병합합니다. 청크 간 비동일 이름이 남으면 후보 이름·ID·청크 ID만으로 한 번 의미 통합합니다. 다른 개념은 별도로 유지하도록 지시합니다. 번역으로 중복을 판정하지 않으며 통합 모델도 후보 이름의 언어를 보존하도록 지시합니다.
 - 미리보기에서 한국어 Content Nature와 Concept 이름을 확인합니다. **중요 표시**는 Concept의 Highlight를 바꿉니다. 이 선택은 현재 미리보기에서만 유지되며 재시작·새 미리보기 생성 후 사라집니다.
@@ -126,7 +126,7 @@ Markdown → 구조 청크 → 청크별 개념/성격 추출
 ### 코드 읽는 순서
 
 1. [framing.ts](src/framing.ts): 전체 실행·완료 경계와 추적 정보.
-2. [chunks.ts](src/chunks.ts): 결정론적 처리 계획과 원문 위치 보존.
+2. [structure.ts](src/structure.ts), [blocks.ts](src/blocks.ts): 저장 구조와 Markdown 파싱. [context.ts](src/context.ts): Section 우선 모델 입력 구성.
 3. [concept-prompts.ts](src/concept-prompts.ts): 선택적 추출·통합 지침.
 4. [concepts.ts](src/concepts.ts): 개념 이름/confidence 검사와 후보 병합.
 5. [main.ts](src/main.ts): 진행 상태와 Concept 검토/Highlight UI.
@@ -135,7 +135,7 @@ Markdown → 구조 청크 → 청크별 개념/성격 추출
 
 ### 저장·이력 호환
 
-`data.json`은 v3를 유지합니다. 기존 local-test Frame은 Legacy로 조회하며 Concept으로 강제 변환하지 않습니다. 이전 Gemini Frame 2/3/4는 메모리 전용이었으므로 새 미리보기를 요청하면 Frame 5를 생성합니다. 외부에서 구버전 payload가 저장되어 있어도 사용자 annotation을 잃는 강제 변환은 하지 않습니다. Domain Catalog와 이전 Attempt는 보존됩니다.
+`data.json`은 v3를 유지합니다. 기존 local-test Frame은 Legacy로 조회하며 자동 변환하지 않습니다. 해당 문서의 로컬 Framing을 다시 실행하면 Structural Frame 6으로 교체합니다. 이전 Gemini Frame 2/3/4는 메모리 전용이었으므로 새 미리보기를 요청하면 Frame 5를 생성합니다. 외부에서 구버전 payload가 저장되어 있어도 사용자 annotation을 잃는 강제 변환은 하지 않습니다. Domain Catalog와 이전 Attempt는 보존됩니다.
 
 호출별 runId는 고유하며 trace의 framingRunId로 같은 문서 실행을 연결합니다. stage/chunkId·원문 해시·청크/추출/통합 버전·실제 입력 해시·Catalog 해시·생성 설정으로 각 호출을 추적합니다. 전체 원문는 Attempt에 복제하지 않습니다. 통합 실패 후 수신된 사용량도 기존 Journal에 남습니다.
 
@@ -151,4 +151,17 @@ Markdown → 구조 청크 → 청크별 개념/성격 추출
 
 [평가 fixture](tests/fixtures/framing-evaluation.ts)에 한국어/영어/약어, 정보/의견/혼합/의미 부족, 긴 정보+짧은 감상 및 긴 의견+짧은 사실을 준비했습니다. 오프라인 테스트는 이 기대 응답의 전달·검증·UI 계약만 확인합니다. 실제 Gemini 평가에서는 fixture 원문으로 미리보기를 요청하여 언어 보존과 mixed 남용 여부를 별도로 기록하세요.
 
-추적 버전: pipeline `concept-pipeline-v2`, 개념 추출 prompt/schema v2, 문서 분류 prompt/schema v4, 통합 prompt v2·알고리즘 v2. 통합 응답 모양은 그대로여서 schema v1을 유지합니다. 생성 설정(출력 토큰 포함)은 변경하지 않았습니다.
+추적 버전: pipeline `concept-pipeline-v3`, 개념 추출 prompt v3/schema v2, 문서 분류 prompt/schema v4, 통합 prompt v2·알고리즘 v2. 통합 응답 모양은 그대로여서 schema v1을 유지합니다. 생성 설정(출력 토큰 포함)은 변경하지 않았습니다.
+
+## Phase 1 — Markdown 구조와 Context Builder
+
+Phase 1은 AI 없이 작성자가 표현한 구조를 관찰합니다. Phase 2는 그 구조로 만든 Context를 읽고 기존 Domain·Content Nature·Concept 의미 분류를 수행합니다. 로컬 결과의 Grounding Signals를 AI의 정보/의견 판정에 사용하지 않습니다.
+
+- **저장:** 섹션 계층(parentId/childIds), 직접 소속 blockIds, subtree 행/offset/바이트, 구조 블록 위치, 통계, 원문 SHA-256. 본문 텍스트는 원문에서 읽습니다.
+- **블록:** paragraph, heading, list, blockquote, code, table, frontmatter, horizontal-rule. 목록과 중첩 item, 연속 인용, 코드 울타리, 지원 GFM 표를 가능한 한 통째로 유지합니다.
+- **Context:** 실행 시 생성하는 임시 모델 입력입니다. sourceRanges는 공백까지 원문을 순서대로 한 번 덮으며 부모 제목 wrapper는 coverage에서 제외합니다. wrapper를 포함해 16 KiB/64블록·최대 32 Context 예산을 적용합니다.
+- **조회:** 로컬 Framing 후 패널에서 Document, Sections의 경로/행/바이트, Structural Stats, Grounding Signals, Semantic ‘아직 실행되지 않음’을 확인합니다. Developer Details에서 해시와 전체 구조 JSON을 확인합니다.
+- **한계:** 완전한 CommonMark/YAML 파서는 아닙니다. ATX 및 한 줄 Setext, 일반 목록/인용, fenced/indented 코드, pipe+delimiter GFM 표를 지원합니다. Grounding 링크 수는 코드 밖의 inline 링크와 angle autolink, footnote 참조, 정해진 참고문헌 제목 및 top-level source metadata 키의 관찰값입니다. 의미·신뢰도 판단이 아닙니다.
+- **예산 오류:** 큰 코드/표/frontmatter는 로컬 저장이 가능해도 모델 입력 예산을 초과하면 Gemini를 호출하기 전에 실패합니다. 서로 다른 H1이 32개를 넘는 문서는 주제를 임의로 섞지 않고 요청 예산 오류를 표시할 수 있습니다.
+
+설계·정확한 section 범위 규칙·검증 기록은 [Phase1_Structural.md](Doc/Phase1_Structural.md)에 있습니다. Context 목록의 개발자 UI 미리보기는 후속 후보입니다.

@@ -153,7 +153,7 @@ Domain과 Content Nature이 이후 지식 검색 및 활용에 사용할 수 있
 
 ### Human Friction
 
-일반적인 문서 추가 과정에서는 사용자가 metadata나 metadata을 직접 입력할 필요가 없어야 한다.
+일반적인 문서 추가 과정에서는 사용자가 metadata를 직접 입력할 필요가 없어야 한다.
 
 기본적인 사용자 경험은 다음과 같아야 한다.
 
@@ -467,7 +467,7 @@ AI가 생성한 Frame과 label은 원본보다 낮은 권위를 가진 파생 �
 
 ## 6.1 Core Approach
 
-Document Framer는 사용자가 저장한 비정형 Markdown을 읽어 deterministic metadata와 AI 기반 semantic annotation을 생성한다.
+Document Framer는 Phase 1에서 Markdown 작성자가 표현한 구조를 deterministic하게 관찰·저장하고, Phase 2에서 Section 우선 Context를 사용해 AI semantic annotation을 생성한다.
 
 원본과 annotation은 분리한다.
 
@@ -540,7 +540,7 @@ Preserved Content   Framing Pipeline
 
 ## 7.3 Knowledge Concept Granularity
 
-긴 문서는 기존 구조 청크로 처리한다. 개념은 문서 전체를 가리키며 이름·confidence·highlight만 가진다. NFC/대소문자/공백 중복을 로컬 병합하고 제한된 의미 통합에서 후보 언어와 표현을 보존한다. 번역 정규화는 하지 않는다.
+긴 문서는 저장 Structural Frame과 분리된 Section 우선 Context Builder로 처리한다. 개념은 문서 전체를 가리키며 이름·confidence·highlight만 가진다. NFC/대소문자/공백 중복을 로컬 병합하고 제한된 의미 통합에서 후보 언어와 표현을 보존한다. 번역 정규화는 하지 않는다.
 
 ---
 
@@ -811,3 +811,9 @@ PRD S-02/S-06, FR-04/FR-11/FR-15, AC-04/AC-05/AC-12와 동일한 정책을 따�
 이전 2R에서 Concept + Evidence 연결을 시험했으나 문서 전반에 걸친 개념의 근거 구간이 넓어지고 복잡도 대비 가치가 낮았다. 새 2S 결정은 Evidence와 역할 라벨을 제거한다. Document Framer는 Markdown을 재구성하거나 요약하지 않고 WHERE(Domain), WHAT KIND(Content Nature), WHAT ABOUT(Key Concepts)에 답하는 최소 semantic metadata 시스템이다. Domain lifecycle, 원문 보존, 구조 청크와 통합을 유지한다. 사용자 Highlight는 메모리 미리보기에서 유지한다.
 
 ---
+
+## Phase 1 Markdown-aware revision
+
+로컬 처리는 더 이상 테스트 엔진이 아니다. local-structural-v1/schema 6은 Section Tree·구조 블록·통계·Grounding Signals·원문 hash와 semantic.status=not-run을 저장하는 정식 artifact다. 제목은 subtree 범위와 direct block membership으로 표현한다. Paragraph/List/Quote/Code/Table/Frontmatter를 구분하고 AI Context는 Section 전체 보존을 먼저 시도한다.
+
+큰 section은 child section과 블록 경계로 분해하고 큰 문단은 문장/줄/Unicode, 큰 목록은 top-level item을 우선한다. 과대한 code/table은 명시적 입력 오류다. 부모 heading wrapper로 맥락을 제공하며 본문 overlap은 없다. 관찰 신호로 정보/의견 성격을 추론하지 않는다. 기존 Domain lifecycle과 의미 분류 계약은 유지한다. 자세한 모델과 정책은 Phase1_Structural.md를 따른다.

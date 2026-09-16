@@ -5,7 +5,7 @@ import { CONTENT_NATURE_NAMES } from './classification';
  * 로컬 결과는 FrameStore에 저장하고, Gemini 결과는 previews 메모리에만 보관한다.
  */
 import { ItemView, MarkdownView, Modal, Notice, Plugin, requestUrl, TFile, WorkspaceLeaf } from 'obsidian';
-import { Frame, ManualQueue, TestEngine } from './core';
+import { ManualQueue, StructuralEngine } from './core';
 import { FrameStore, GeminiKey } from './storage';
 import { FramerSettingsTab } from './settings';
 import { GeminiClient, GeminiError } from './gemini';
@@ -13,6 +13,7 @@ import { GeminiFramer, Preview } from './framing';
 import { AttemptJournal, attemptSummary } from './attempts';
 import { domainKey } from './domains';
 import { BUDGET } from './budget';
+import { StoredFrame, isStructuralFrame } from './structure';
 const VIEW = 'document-framer-view';
 // 비동기 작업이 시작한 파일 객체와 경로 세대를 기억한다. 같은 경로에 새 파일이 생겨도 구별한다.
 interface SourceTicket { path: string; file: TFile; generation: number }
@@ -32,10 +33,10 @@ export default class DocumentFramer extends Plugin {
   private client = new GeminiClient(request => requestUrl(request), undefined, undefined, this.journal);
   private framer = new GeminiFramer(this.client);
   get connectionState() { return this.client.status; }
-  get frames(): Record<string, Frame> { return this.store.state.frames; }
+  get frames(): Record<string, StoredFrame> { return this.store.state.frames; }
   get key() { return new GeminiKey(this.app.secretStorage); }
   statuses = new Map<string, string>();
-  private engine = new TestEngine();
+  private engine = new StructuralEngine();
   private stopped = false;
   private ticking = false;
   private storageError = false;
@@ -119,24 +120,28 @@ export default class DocumentFramer extends Plugin {
     if (this.ticking || this.stopped) return;
     this.ticking = true;
     try {
-      for (const path of this.queue.takeReady(Date.now())) {
+      const localReady = this.queue.takeReady(Date.now()).map(path => {
+        const file = this.app.vault.getAbstractFileByPath(path);
+        return { path, ticket: file instanceof TFile ? this.ticket(file) : null };
+      });
+      for (const { path, ticket } of localReady) {
         try {
-          const file = this.app.vault.getAbstractFileByPath(path);
-          if (!(file instanceof TFile)) throw new Error('문서가 삭제되거나 이동되었습니다. 다시 요청하세요.');
+          if (!ticket || !this.valid(ticket)) continue;
+          const file = ticket.file;
           const text = await this.read(file);
+          if (!this.valid(ticket)) continue;
           this.observe(file, text);
-          // 실행 직전 다시 읽은 내용이 바뀌었다면 요청을 되돌려 60초 대기를 이어간다.
           if (this.queue.remaining(path, Date.now()) > 0) {
             this.queue.finish(path); this.queue.request(path); continue;
           }
-          this.statuses.set(path, '테스트 Frame 생성 중…'); this.refresh();
-          const frame = this.engine.generate({ path, basename: file.basename, ctime: file.stat.ctime, mtime: file.stat.mtime, text });
-          if (this.stopped) break;
-          await this.store.saveFrame(path, frame);
-          this.statuses.set(path, '테스트 Frame 저장 완료');
+          this.statuses.set(path, 'Structural Frame 생성 중…'); this.refresh();
+          const frame = await this.engine.generate({ path, basename: file.basename, ctime: file.stat.ctime, mtime: file.stat.mtime, text });
+          if (!this.valid(ticket)) continue;
+          await this.store.saveFrame(path, frame, () => this.valid(ticket));
+          if (this.valid(ticket)) this.statuses.set(path, 'Structural Frame 저장 완료');
         } catch (error) {
-          this.fail(path, error instanceof Error ? `처리 실패: ${error.message} 다시 요청할 수 있습니다.` : '저장에 실패했습니다. 다시 요청하세요.');
-        } finally { this.queue.finish(path); }
+          if (ticket && this.valid(ticket)) this.fail(path, error instanceof Error ? `처리 실패: ${error.message} 다시 요청할 수 있습니다.` : '저장에 실패했습니다. 다시 요청하세요.');
+        } finally { if (ticket && this.valid(ticket)) this.queue.finish(path); }
       }
       // AI 처리 후보의 파일 신원을 미리 캡처하여 앞선 요청을 기다리는 동안의 삭제·이동도 감지한다.
       const ready = this.previewQueue.takeReady(Date.now()).map(path => {
@@ -242,7 +247,7 @@ class FrameView extends ItemView {
     this.signature = signature;
     this.contentEl.empty(); this.contentEl.addClass('document-framer');
     this.contentEl.createEl('h2', { text: 'Document Framer' });
-    this.contentEl.createEl('p', { text: '1단계 · 로컬 테스트 엔진 (AI 분류 아님)' });
+    this.contentEl.createEl('p', { text: '1단계 · Markdown 구조 Framing (AI 사용 안 함)' });
     this.contentEl.createEl('p', { text: path ?? '선택된 문서 없음', cls: 'df-path' });
     const button = this.contentEl.createEl('button', { text: '현재 문서 Framing', cls: 'mod-cta' });
     button.disabled = !path;
@@ -250,7 +255,7 @@ class FrameView extends ItemView {
     this.contentEl.createEl('p', { text: state, attr: { role: 'status' } });
     this.contentEl.createEl('p', { text: '마지막 원문 변경 후 60초가 지나면 요청을 실행합니다.' });
     this.contentEl.createEl('h3', { text: '2단계 · Gemini 미리보기' });
-    this.contentEl.createEl('p', { text: `문서당 최대 ${BUDGET.maxChunks}개 청크 · ${BUDGET.maxLogicalRequests}회 요청 (재시도 포함 ${BUDGET.maxHttpAttempts}회 전송). 짧은 문서는 1회 추출합니다.` });
+    this.contentEl.createEl('p', { text: `문서당 최대 ${BUDGET.maxChunks}개 청크 · ${BUDGET.maxLogicalRequests}회 요청 (재시도 포함 ${BUDGET.maxHttpAttempts}회 전송). 단일 섹션은 예산 내에서 1회 추출합니다.` });
     this.contentEl.createEl('p', { text: '요청 시 현재 문서 텍스트를 Google Gemini로 전송합니다. API 이용 요금이 발생할 수 있습니다. 결과는 별도 미리보기로만 표시됩니다.' });
     this.contentEl.createEl('p', { text: '무상 API의 입력·출력은 제품 개선과 사람 검토에 이용될 수 있습니다. 비민감 문서로 평가하고 적용 조건·지역 예외는 설정의 공식 정책 안내를 확인하세요.' });
     const generate = this.contentEl.createEl('button', { text: 'Gemini 미리보기 요청' });
@@ -267,7 +272,21 @@ class FrameView extends ItemView {
       inspect.onclick = () => this.plugin.showPreview(path);
     }
     if (frame) {
-      this.contentEl.createEl('h3', { text: '저장된 Legacy 테스트 결과' });
+      this.contentEl.createEl('h3', { text: isStructuralFrame(frame) ? 'Phase 1 · Structural Frame' : 'Legacy Frame · 로컬 Framing을 다시 실행하세요' });
+      if (isStructuralFrame(frame)) {
+        this.contentEl.createEl('h4', { text: 'Document' });
+        this.contentEl.createEl('p', { text: `${frame.document.title} · ${frame.document.lineCount}행 · ${frame.document.bytes} bytes` });
+        this.contentEl.createEl('h4', { text: 'Sections' });
+        for (const section of frame.structure.sections) {
+          this.contentEl.createEl('p', { text: `${section.headingPath.join(' → ') || '(Root)'} · ${section.startLine}~${section.endLine}행 · ${section.byteLength} bytes` });
+        }
+        this.contentEl.createEl('h4', { text: 'Structural Stats' });
+        for (const [name, count] of Object.entries(frame.structure.stats)) this.contentEl.createEl('p', { text: `${name}: ${count}` });
+        this.contentEl.createEl('h4', { text: 'Grounding Signals · 구조 관찰값' });
+        for (const [name, value] of Object.entries(frame.groundingSignals)) this.contentEl.createEl('p', { text: `${name}: ${Array.isArray(value) ? value.join(', ') || '없음' : value}` });
+        this.contentEl.createEl('h4', { text: 'Semantic' });
+        this.contentEl.createEl('p', { text: '아직 실행되지 않음' });
+      }
       this.contentEl.createEl('p', { text: '요청 당시 결과입니다. 수정한 문서는 다시 Framing을 요청하세요.' });
       const details = this.contentEl.createEl('details');
       details.createEl('summary', { text: 'Developer Details' });

@@ -1,1478 +1,1660 @@
-# Document Framer — Framing Core 단순화 및 Content Nature 도입
+# Document Framer — Markdown-Aware Phase 1 Structural Framing 재설계
 
-이번 요청은 기존 PRD와 구현보다 우선하는 **새로운 사용자 결정**이다.
+이번 요청은 현재 구현보다 우선하는 새로운 사용자 결정이다.
 
-현재 Concept-Based Framing을 실제 Vault 문서에 적용해 본 결과, Evidence 기반 구조가 제품 목적에 비해 지나치게 복잡하며 실제 분류 품질도 좋지 않은 문제가 확인되었다.
+이번 작업의 목적은 **AI를 사용하지 않는 Phase 1 Framing을 Markdown-aware structural processing layer로 재설계하는 것**이다.
 
-이번 변경의 핵심은 다음과 같다.
+단순히 문서 통계를 저장하는 수준이 아니라, 사용자가 Markdown을 통해 이미 표현한 문서 구조를 최대한 보존하여 이후 Phase 2 AI가 긴 문서를 읽을 때 **내용의 흐름이 중간에서 끊기지 않도록 context를 구성할 수 있는 기반**을 만든다.
 
-```text
-1. Evidence를 완전히 제거한다.
-2. Semantic Evidence Label도 제거한다.
-3. Key Concept은 문서의 semantic index 역할만 한다.
-4. Concept 이름은 원문의 언어와 표현을 최대한 보존한다.
-5. 기존 Document Type을 Content Nature로 교체한다.
-6. information / opinion / mixed / unclassified를 구분한다.
-7. 긴 문서 structural chunking과 Concept consolidation은 유지한다.
-8. Domain lifecycle은 변경하지 않는다.
-9. Gemini 503 transient error 대응을 제한적으로 강화한다.
-```
+이번 작업에서는 Phase 2의 Content Nature 정확도 개선, Human Review, Grounding-aware AI classification은 구현하지 않는다.
 
-단순히 기존 코드에 예외를 추가하지 말고, 불필요해진 Evidence 관련 구조를 제거하여 전체 architecture를 단순화한다.
+우선 Phase 1 structural pipeline을 완성한다.
 
 ---
 
-# 1. 제품 정의 변경
+# 1. 핵심 제품 정의
 
-Document Framer의 핵심 역할을 다음과 같이 정의한다.
-
-> Document Framer는 Markdown 원문을 다시 구조화하거나 요약하는 시스템이 아니다.
-> 문서가 어떤 지식 영역에 속하고, 어떤 성격의 글이며, 어떤 핵심 개념을 포함하는지를 나타내는 최소한의 semantic metadata를 생성하는 시스템이다.
-
-Raw Markdown은 계속 Source of Truth다.
-
-Frame은 최소한 다음 질문에 답한다.
+Phase 1과 Phase 2의 역할을 다음처럼 명확하게 구분한다.
 
 ```text
-WHERE?
-→ Domain
+Phase 1
+Observation / Structure
 
-WHAT KIND?
-→ Content Nature
+"문서에 실제로 어떤 구조가 존재하는가?"
 
-WHAT ABOUT?
-→ Key Concepts
+↓
+
+Phase 2
+Interpretation / Semantics
+
+"이 문서가 무엇을 의미하는가?"
 ```
+
+Phase 1은 AI를 사용하지 않는다.
+
+Phase 1의 핵심 정의:
+
+> Markdown 작성자가 이미 표현한 구조를 deterministic하게 해석하고,
+> 원문의 논리적 흐름을 최대한 보존한 structural representation을 생성한다.
+
+그리고 이 구조를 이용해 Phase 2 실행 시
+AI가 읽기 좋은 Context Unit을 생성할 수 있어야 한다.
 
 ---
 
-# 2. 최종 Frame의 핵심 구조
+# 2. Phase 1은 Markdown-aware compiler처럼 동작한다
 
-개념적으로 다음 구조를 목표로 한다.
+Phase 1은 단순 metadata extractor가 아니다.
 
-```ts
-interface Frame {
-  document: {
-    // existing deterministic metadata
-
-    domains: DomainClassification[];
-
-    contentNature: ContentNatureClassification;
-  };
-
-  concepts: KnowledgeConcept[];
-}
-```
-
-Concept은 단순하게 유지한다.
-
-```ts
-interface KnowledgeConcept {
-  id: string;
-  concept: string;
-  confidence: number;
-  highlight: boolean;
-}
-```
-
-필요하다면 confidence는 현재처럼 내부 평가용으로 유지한다.
-
-Concept에는 다음을 저장하지 않는다.
+개념적으로:
 
 ```text
-evidence
-blockIds
-startLine
-endLine
-startOffset
-endOffset
+Raw Markdown
+      ↓
+Markdown-aware Parsing
+      ↓
+Structural Frame
+      ├─ Document Metadata
+      ├─ Section Tree
+      ├─ Structural Blocks
+      ├─ Structural Statistics
+      └─ Grounding Signals
+      ↓
+Context Builder
+      ↓
+AI Context Units
+```
+
+여기서 중요한 구분:
+
+```text
+Structural Frame
+= 저장되는 deterministic artifact
+
+AI Context Unit
+= Phase 2 실행 시 필요에 따라 생성하는 모델 입력 단위
+```
+
+둘을 동일한 개념으로 만들지 않는다.
+
+---
+
+# 3. 기존 Local Test Frame 제거
+
+현재:
+
+```text
+engine: local-test-v1
+
+domains: []
+type: null
+confidence: null
+
+knowledgeUnits:
+- entire document
+- TEST_ONLY
+```
+
+구조를 제거한다.
+
+다음 legacy 요소를 local frame에서 삭제한다.
+
+```text
+local-test-v1
+TEST_ONLY
+knowledgeUnits
 semantic labels
-source excerpt
-summary
+domains: []
+type: null
+confidence: null
 ```
 
----
-
-# 3. Evidence 완전 제거
-
-현재 Concept마다 Evidence를 요구하는 구조를 제거한다.
-
-다음 구조는 폐기한다.
-
-```text
-Concept
- └─ Evidence
-      ├─ blockIds
-      ├─ line range
-      ├─ offsets
-      └─ labels
-```
-
-이유:
-
-실제 문서에서는 하나의 Concept이 문서 전체에 걸쳐 설명되는 경우가 많다.
-
-예를 들어 투자 독서록 전체가 `분산투자`, `효율적 시장 가설`, `위험` 등에 관련되어 있으면 Gemini가 매우 넓은 원문 영역을 Evidence로 선택할 수 있다.
-
-이를 더 정교한 Evidence selection 문제로 해결하지 않는다.
-
-MVP에서는 Evidence 자체를 제거한다.
-
-Raw Markdown 전체가 해당 Frame의 source이므로 Concept → Document 관계만 유지한다.
-
----
-
-# 4. Semantic Label 제거
-
-다음 taxonomy도 Concept pipeline에서 제거한다.
-
-```text
-claim
-evidence
-conclusion
-idea
-observation
-decision
-context
-unclassified
-```
-
-Evidence가 사라지므로 이 annotation 계층도 필요하지 않다.
-
-관련:
-
-* schema
-* validator
-* prompt
-* merge logic
-* UI
-* tests
-* PRD
-* Project Brief
-
-에서 제거한다.
-
-다른 기능에서 LABELS가 사용되고 있다면 먼저 repository 전체 사용처를 확인하고 안전하게 제거한다.
-
----
-
-# 5. Key Concept의 역할
-
-Key Concept은 Knowledge Unit이나 요약문이 아니다.
-
-Concept은:
-
-> 이 문서가 어떤 핵심 개념들을 다루고 있는지를 나타내는 semantic index
-
-다.
+AI semantic processing을 실행하지 않았다는 사실은 명시적으로 표현한다.
 
 예:
-
-```text
-Domain
-Finance → Investing
-
-Content Nature
-information
-
-Key Concepts
-- 효율적 시장 가설
-- 분산투자
-- 체계적 위험
-- 비체계적 위험
-- 베타
-- 자본자산 가격결정 모형(CAPM)
-- 재정가격결정 이론(APT)
-- 행동재무학
-- 스마트 베타
-- 위험균등
-```
-
----
-
-# 6. Concept 언어 정책 — Source-Language-First
-
-이 요구사항은 중요하다.
-
-현재 한국어 문서를 Framing해도 Concept이 영어로 변환되는 경우가 있다.
-
-앞으로 Concept 이름은 **원문의 언어와 표현을 최대한 그대로 보존**한다.
-
-## 기본 우선순위
-
-```text
-1. 원문에 명시적으로 등장한 용어를 그대로 사용한다.
-
-2. 동일 개념이 여러 형태로 등장하면
-   문서에서 가장 자연스럽고 대표적으로 사용된 표현을 선택한다.
-
-3. 원문에 명시적인 Concept 이름이 없어서 AI가 이름을 만들어야 한다면
-   문서의 주 언어로 Concept 이름을 작성한다.
-
-4. 다른 언어로 번역하거나 영어 canonical form으로 바꾸지 않는다.
-```
-
----
-
-# 7. 한국어 문서 처리
-
-한국어가 주 언어인 문서에서는 일반적으로 한국어 Concept을 생성한다.
-
-예:
-
-```text
-원문:
-효율적 시장 가설에 따르면...
-
-Concept:
-효율적 시장 가설
-```
-
-다음처럼 임의로 번역하지 않는다.
-
-```text
-❌ Efficient Market Hypothesis
-```
-
-원문:
-
-```text
-분산투자를 통해 비체계적 위험을...
-```
-
-Concept:
-
-```text
-분산투자
-비체계적 위험
-```
-
-다음처럼 바꾸지 않는다.
-
-```text
-❌ Diversification
-❌ Unsystematic Risk
-```
-
----
-
-# 8. 원문에 영어가 존재하는 경우
-
-원문 자체가 영어 전문용어를 사용한다면 그대로 유지한다.
-
-예:
-
-```text
-ETF
-Bitcoin
-Transformer
-RAG
-CAPM
-APT
-```
-
-이를 억지로 한국어로 번역하지 않는다.
-
----
-
-# 9. 한국어 + 영문 약어
-
-원문에 다음과 같이 쓰여 있다면:
-
-```text
-자본자산 가격결정 모형(CAPM)
-```
-
-가능하면 Concept도:
-
-```text
-자본자산 가격결정 모형(CAPM)
-```
-
-으로 유지한다.
-
-원문이:
-
-```text
-CAPM
-```
-
-만 사용한다면:
-
-```text
-CAPM
-```
-
-을 그대로 사용한다.
-
-AI가 임의로 표현을 확장하거나 번역하지 않는다.
-
----
-
-# 10. Concept prompt의 영어 편향 제거
-
-Concept extraction prompt에서 영어 Concept 예시만 사용하는 것을 피한다.
-
-예를 들어 현재와 같은:
-
-```text
-Diversification
-Systematic Risk
-Efficient Market Hypothesis
-```
-
-만을 representative example로 제시하지 않는다.
-
-필요하면 언어 중립적인 설명 또는 다국어 예시를 사용한다.
-
-예:
-
-```text
-원문: "행동재무학"
-→ Concept: "행동재무학"
-
-원문: "Behavioral Finance"
-→ Concept: "Behavioral Finance"
-```
-
-Prompt에 다음 규칙을 명시한다.
-
-```text
-PRESERVE SOURCE LANGUAGE
-
-- Prefer an explicit term already present in the source.
-- Do not translate a concept merely to normalize it.
-- Do not convert Korean concepts into English canonical terms.
-- Do not convert English technical terms into Korean unless the source does so.
-- When a concept name must be inferred, use the dominant natural language of the source chunk/document.
-```
-
----
-
-# 11. Content Nature 도입
-
-기존 Document Type taxonomy:
-
-```text
-informational
-idea-note
-prose-with-decision
-prose-without-decision
-unclassified
-```
-
-를 폐기한다.
-
-대신:
-
-```ts
-type ContentNature =
-  | "information"
-  | "opinion"
-  | "mixed"
-  | "unclassified";
-```
-
-를 사용한다.
-
-내부 enum은 영어로 유지해도 된다.
-
-UI에서는 한국어로 표시한다.
-
-```text
-information  → 정보
-opinion      → 의견
-mixed        → 정보 + 의견
-unclassified → 분류 어려움
-```
-
----
-
-# 12. information 정의
-
-다음이 문서의 중심이면 `information`.
-
-* 사실
-* 개념
-* 이론
-* 설명
-* 절차
-* 참고자료
-* 책/논문 내용 정리
-* 외부 지식 기록
-
-예:
-
-```text
-CAPM에서는 기대수익률을 무위험수익률과
-시장 위험 프리미엄으로 설명한다.
-```
-
-작성자의 짧은 코멘트 한두 개가 포함되어 있다고
-자동으로 mixed로 분류하지 않는다.
-
----
-
-# 13. opinion 정의
-
-다음이 문서의 중심이면 `opinion`.
-
-* 작성자의 판단
-* 주장
-* 평가
-* 해석
-* 선호
-* 개인적 견해
-
-예:
-
-```text
-나는 개별주식 투자보다 ETF 투자가
-대부분의 개인투자자에게 적합하다고 생각한다.
-```
-
-근거를 위해 사실 몇 개를 인용했다고
-자동으로 mixed로 분류하지 않는다.
-
----
-
-# 14. mixed 정의
-
-`information`과 `opinion`이 모두 문서 이해에 실질적으로 중요한 경우에만 사용한다.
-
-예:
-
-```text
-효율적 시장 가설에서는
-지속적인 초과수익 창출이 어렵다고 본다.
-
-나는 이를 고려했을 때
-개인투자자는 인덱스 투자를 기본 전략으로 삼는 것이 좋다고 본다.
-```
-
-이 문서에서는 외부 정보와 작성자의 판단이 모두 핵심이므로:
-
-```text
-mixed
-```
-
-가 적합하다.
-
----
-
-# 15. mixed 남용 금지
-
-Prompt에 명시한다.
-
-```text
-Do not choose mixed merely because both information and opinion appear somewhere.
-
-Choose the dominant nature when the secondary nature is minor.
-
-Use mixed only when both are materially important to understanding the document.
-```
-
-예:
-
-```text
-정보 90% + 짧은 감상 10%
-→ information
-
-개인 의견 90% + 근거 사실 10%
-→ opinion
-
-정보와 의견이 모두 주요 내용
-→ mixed
-```
-
----
-
-# 16. unclassified
-
-다음과 같이 의미가 부족한 경우에만 사용한다.
-
-```text
-짧은 임시 메모
-의미 없는 문자열
-내용 부족
-문맥 부족
-```
-
-분류가 어렵다는 이유만으로 쉽게 사용하지 않는다.
-
----
-
-# 17. Decision / Idea를 Content Nature에 섞지 않는다
-
-이번 버전에서는:
-
-```text
-decision
-idea
-question
-reflection
-```
-
-등을 별도 taxonomy로 추가하지 않는다.
-
-향후 필요하면 `signals`라는 독립 metadata로 추가할 수 있다.
-
-이번 scope에서는 구현하지 않는다.
-
-Change Candidate로만 기록한다.
-
----
-
-# 18. Chunk-level processing
-
-현재 구현된 Structural Chunking은 유지한다.
-
-긴 문서는 계속:
-
-```text
-Document
-→ Structural Chunks
-→ Chunk-level AI extraction
-→ Consolidation
-→ Final Frame
-```
-
-으로 처리한다.
-
-다만 각 chunk의 AI 출력은 단순해진다.
-
-기존:
-
-```text
-domains
-type
-concepts
-  └─ evidence
-      └─ labels
-```
-
-새 구조:
-
-```text
-domains
-contentNature
-concepts
-```
-
----
-
-# 19. Chunk-level Concept schema
-
-권장 schema:
-
-```ts
-{
-  domains: DomainClassification[];
-
-  contentNature: {
-    id: "information" | "opinion" | "mixed" | "unclassified";
-    confidence: number;
-  };
-
-  concepts: {
-    concept: string;
-    confidence: number;
-  }[];
-}
-```
-
-Concept는 zero-length array를 허용한다.
-
-모든 chunk가 Concept을 생성할 필요는 없다.
-
----
-
-# 20. Concept validation 단순화
-
-Concept validation은 최소한 다음만 확인한다.
-
-```text
-- concepts가 array인지
-- 개수가 budget 범위인지
-- concept가 빈 문자열이 아닌지
-- trim된 문자열인지
-- 최대 길이를 넘지 않는지
-- control / invisible character가 없는지
-- confidence가 finite 0..1인지
-```
-
-Evidence 관련 검증은 모두 제거한다.
-
-다음 검증은 더 이상 존재하지 않아야 한다.
-
-```text
-block ID 존재 여부
-Evidence block 중복
-연속 block 요구
-Evidence group
-Semantic Label validation
-line range 생성
-offset 생성
-```
-
----
-
-# 21. 오류 메시지 정리
-
-현재와 같은:
-
-```text
-Concept 응답 검증 실패:
-개념 이름·Evidence·후보 참조를 확인하세요.
-```
-
-는 Evidence 제거 후 더 이상 적절하지 않다.
-
-새 오류는 실제 검증 실패 원인을 반영한다.
-
-예:
-
-```text
-Concept 응답 검증 실패:
-개념 이름 또는 confidence 형식을 확인하세요.
-```
-
-가능하면 developer log에서는 구체적인 validation reason을 남기되,
-사용자 UI는 짧고 이해 가능한 메시지를 보여준다.
-
-모델이 잘못된 응답을 반환한 경우 source document 자체의 오류처럼 표현하지 않는다.
-
----
-
-# 22. Concept exact duplicate merge 유지
-
-현재 normalized exact duplicate merge 아이디어는 유지한다.
-
-정규화는 다음 정도만 허용한다.
-
-```text
-Unicode NFC
-case normalization
-whitespace normalization
-```
-
-그러나 **번역을 사용한 normalization은 하지 않는다.**
-
-예:
-
-```text
-행동재무학
-Behavioral Finance
-```
-
-를 코드가 동일 Concept이라고 자동으로 판단하지 않는다.
-
-언어가 다르면 기본적으로 별도 Concept으로 취급한다.
-
----
-
-# 23. Semantic consolidation 유지
-
-여러 chunk에서 유사 Concept이 나오면 현재처럼 semantic consolidation을 사용할 수 있다.
-
-하지만 consolidation prompt에도 언어 보존 규칙을 추가한다.
-
-예:
-
-```text
-candidate 1:
-분산투자
-
-candidate 2:
-포트폴리오 분산
-
-→ 대표 Concept을 한국어 후보 중 선택
-```
-
-다음처럼 바꾸지 않는다.
-
-```text
-❌ Diversification
-```
-
-Consolidation 모델은 가능하면 기존 candidate 이름 중 하나를 선택한다.
-
-새 이름을 생성해야 하는 경우에도 문서의 주 언어를 따른다.
-
----
-
-# 24. Consolidation에 document language hint 전달
-
-필요하면 chunk/document에서 간단한 `languageHint`를 얻어
-consolidation input에 전달할 수 있다.
-
-하지만 별도의 복잡한 language detection dependency를 추가하지 않는다.
-
-우선 prompt가 실제 candidate names를 보면서 언어를 보존하도록 한다.
-
-필요한 경우 아주 단순한 deterministic heuristic을 사용해도 되지만
-새 라이브러리를 추가하지 않는다.
-
----
-
-# 25. 최종 Document Content Nature
-
-여러 chunk가 존재하는 경우
-최종 Content Nature는 chunk 결과를 단순 majority vote로 결정하지 않는다.
-
-현재 document-level classification call과 유사하게
-전체 chunk signal을 보고 최종 분류하도록 한다.
-
-입력 예:
 
 ```json
 {
-  "chunks": [
-    {
-      "contentNature": "information",
-      "concepts": ["효율적 시장 가설", "분산투자"]
-    },
-    {
-      "contentNature": "mixed",
-      "concepts": ["행동재무학"]
-    }
+  "semantic": {
+    "status": "not-run"
+  }
+}
+```
+
+---
+
+# 4. 새 Engine
+
+새 local engine:
+
+```text
+local-structural-v1
+```
+
+을 사용한다.
+
+이 결과는 더 이상 테스트 fixture가 아니라
+정식 Phase 1 artifact다.
+
+---
+
+# 5. 가장 중요한 원칙 — Markdown 구조 우선
+
+Context를 만들 때 단순 byte size를 최우선 기준으로 사용하지 않는다.
+
+우선순위는 다음과 같다.
+
+```text
+Markdown semantic structure
+        ↓
+Heading hierarchy
+        ↓
+Section boundary
+        ↓
+Paragraph / List / Quote / Table / Code block
+        ↓
+size budget
+```
+
+즉:
+
+> 먼저 의미적으로 완전한 Markdown 단위를 만들고,
+> 그 단위가 모델 budget을 초과할 때만 더 작은 구조로 분해한다.
+
+---
+
+# 6. Heading은 Section Hierarchy다
+
+다음 문서:
+
+```markdown
+# 투자 이론
+
+서론
+
+## 효율적 시장 가설
+
+본문
+
+### 약형 효율성
+
+본문
+
+### 강형 효율성
+
+본문
+
+## 행동재무학
+
+본문
+```
+
+을 단순 heading 배열로만 보지 않는다.
+
+다음과 같은 계층으로 해석한다.
+
+```text
+투자 이론
+├─ intro
+├─ 효율적 시장 가설
+│  ├─ 본문
+│  ├─ 약형 효율성
+│  └─ 강형 효율성
+└─ 행동재무학
+```
+
+---
+
+# 7. Section Tree
+
+각 Section은 최소 다음 정보를 가진다.
+
+```ts
+interface SectionInfo {
+  id: string;
+
+  level: number;
+
+  title: string | null;
+
+  headingPath: string[];
+
+  startLine: number;
+  endLine: number;
+
+  startOffset: number;
+  endOffset: number;
+
+  byteLength: number;
+
+  blockIds: string[];
+}
+```
+
+예:
+
+```json
+{
+  "id": "section-4",
+  "level": 3,
+  "title": "약형 효율성",
+
+  "headingPath": [
+    "투자 이론",
+    "효율적 시장 가설",
+    "약형 효율성"
+  ],
+
+  "startLine": 18,
+  "endLine": 31,
+
+  "blockIds": [
+    "block-14",
+    "block-15"
   ]
 }
 ```
 
-최종적으로 문서 전체의 성격을 판정한다.
-
 ---
 
-# 26. Domain lifecycle 유지
+# 8. Section 범위 규칙
 
-현재 이미 검증된 다음 흐름은 변경하지 않는다.
+Heading Section의 범위는 deterministic해야 한다.
+
+기본 규칙:
 
 ```text
-Existing Domain reuse
-New Domain proposal
-User approval
-Domain persistence
+현재 heading
+→ 다음 동일 level 또는 상위 level heading 직전
 ```
 
-Domain prompt와 validation은
-Content Nature 변경 때문에 불필요하게 재작성하지 않는다.
+예:
 
----
+```markdown
+## A
 
-# 27. 503 오류 대응 강화
+text
 
-현재 503 등 transient server error가 실제 사용 중 반복적으로 발생한다.
+### A-1
 
-Gemini client에서 transient HTTP 상태:
+text
 
-```text
-408
-500
-502
-503
-504
+### A-2
+
+text
+
+## B
 ```
 
-에 대한 retry budget을:
+`A` Section은 개념적으로 B 직전까지의 subtree를 포함할 수 있다.
+
+다만 실제 block membership을 중복 저장하면 복잡해질 수 있으므로:
 
 ```text
-최대 3 attempts
-```
-
-로 변경한다.
-
-즉:
-
-```text
-Initial request
+Section Tree hierarchy
 +
-최대 2회 retry
+direct blocks
 ```
 
-다.
+구조를 사용하는 것도 허용한다.
 
-무한 재시도는 금지한다.
+Codex는 구현 전에 section semantics를 명확히 결정하고
+tests로 고정한다.
+
+중요 조건:
+
+```text
+같은 입력
+→ 항상 같은 Section Tree
+```
+
+여야 한다.
 
 ---
 
-# 28. Retry delay
+# 9. Heading Path
 
-현재 고정 1초 retry 대신
-bounded exponential backoff + small jitter를 사용한다.
-
-예시 목표:
+Phase 2에서 일부 문서만 읽더라도
+상위 문맥을 잃지 않도록 모든 section에:
 
 ```text
-1차 실패
-→ 약 1~2초
-
-2차 실패
-→ 약 3~5초
-
-3차 실패
-→ 사용자에게 오류 반환
+headingPath
 ```
 
-구체적인 숫자는 상수로 관리한다.
+를 제공한다.
+
+예:
+
+```text
+투자 이론
+→ 효율적 시장 가설
+→ 약형 효율성
+```
+
+이 정보는 긴 문서 처리에서 중요하다.
+
+---
+
+# 10. Structural Block
+
+Section 아래에는 Markdown structural block을 만든다.
+
+권장 block 종류:
+
+```ts
+type StructuralBlockKind =
+  | "paragraph"
+  | "heading"
+  | "list"
+  | "blockquote"
+  | "code"
+  | "table"
+  | "frontmatter"
+  | "horizontal-rule";
+```
+
+현재 repository parser 구조와 맞지 않는 항목은 조정할 수 있다.
+
+---
+
+# 11. Paragraph
+
+빈 줄 등 Markdown 문단 경계를 기준으로
+연속 prose를 하나의 paragraph block으로 취급한다.
+
+중요:
+
+```text
+Paragraph
+≠ AI request 하나
+```
+
+Paragraph는 **Context를 더 이상 쉽게 쪼개지 않기 위한 atomic structural unit**이다.
+
+기본 AI Context는 Section이다.
+
+---
+
+# 12. List는 하나의 Block으로 유지
+
+예:
+
+```markdown
+분산투자의 장점:
+
+1. 위험 감소
+2. 기업 의존도 감소
+3. 변동성 감소
+4. 위험 대비 수익률 개선
+```
+
+이 목록 전체를 가능한 한 하나의 structural block으로 유지한다.
+
+다음은 피한다.
+
+```text
+Context A
+1.
+2.
+
+Context B
+3.
+4.
+```
+
+ordered / unordered list 모두 적용한다.
+
+nested list도 가능하면 하나의 list structure로 보존한다.
+
+---
+
+# 13. Blockquote
+
+연속된 Markdown quote:
+
+```markdown
+> 첫 번째 문장
+> 두 번째 문장
+> 세 번째 문장
+```
+
+을 하나의 quote block으로 처리한다.
+
+줄마다 별도 block으로 만들지 않는다.
+
+---
+
+# 14. Code Block
+
+Fenced code:
+
+````markdown
+```ts
+const value = 1;
+```
+````
+
+전체를 하나의 atomic block으로 유지한다.
+
+정상적인 상황에서는 code fence 내부를 split하지 않는다.
+
+Code 내부의:
+
+```text
+#
+-
+|
+>
+```
+
+등을 Markdown heading/list/table로 오해하지 않는다.
+
+---
+
+# 15. Table
+
+GFM-style Markdown table은 가능한 경우 하나의 atomic block으로 유지한다.
+
+예:
+
+```markdown
+| 지표 | 값 |
+|---|---:|
+| A | 10 |
+| B | 20 |
+```
+
+행 중간에서 split하지 않는다.
+
+새로운 완전한 Markdown parser를 작성할 필요는 없다.
+
+현재 구현에서 안정적으로 탐지할 수 있는 table만 지원한다.
+
+---
+
+# 16. Frontmatter
+
+YAML frontmatter:
+
+```markdown
+---
+author: ...
+source: ...
+tags:
+  - ...
+---
+```
+
+는 별도의 metadata block으로 처리한다.
+
+본문 paragraph로 취급하지 않는다.
+
+Phase 2 Concept extraction에서 frontmatter가 일반 본문처럼 과도한 영향을 주지 않도록
+구분되어 있어야 한다.
+
+---
+
+# 17. Horizontal Rule
+
+Markdown horizontal rule:
+
+```markdown
+---
+```
+
+단 frontmatter가 아닌 경우,
+
+```text
+weak structural boundary
+```
+
+로 사용할 수 있다.
+
+강제 Section Heading은 아니다.
+
+Context builder에서 자연스러운 split 후보로 활용할 수 있다.
+
+---
+
+# 18. Heading 없는 문서
+
+Heading이 하나도 없는 문서도 정상 처리한다.
+
+이 경우 root section을 만든다.
+
+예:
+
+```json
+{
+  "id": "section-root",
+  "level": 0,
+  "title": null,
+  "headingPath": [],
+  "startLine": 1,
+  "endLine": 150
+}
+```
+
+그 아래 paragraph/list/etc structural blocks를 연결한다.
+
+---
+
+# 19. Structural Frame 권장 Shape
+
+개념적으로 다음 형태를 목표로 한다.
+
+```ts
+interface StructuralFrame {
+  schemaVersion: number;
+
+  engine: "local-structural-v1";
+
+  generatedAt: string;
+
+  document: {
+    path: string;
+    title: string;
+
+    createdAt: number;
+    modifiedAt: number;
+
+    bytes: number;
+    lineCount: number;
+  };
+
+  structure: {
+    sections: SectionInfo[];
+
+    blocks: StructuralBlock[];
+
+    stats: StructuralStats;
+  };
+
+  groundingSignals: GroundingSignals;
+
+  semantic: {
+    status: "not-run";
+  };
+}
+```
+
+---
+
+# 20. 원문 전체를 Frame에 복제하지 않는다
+
+Structural Frame은 Raw Markdown을 복제하는 저장소가 아니다.
+
+Block에는 가능하면:
+
+```text
+startLine
+endLine
+startOffset
+endOffset
+```
+
+을 저장하고,
+
+실제 text는 필요할 때 Raw Markdown에서 가져온다.
+
+Source of Truth:
+
+```text
+Raw Markdown
+```
+
+원칙을 유지한다.
+
+---
+
+# 21. Structural Statistics
+
+AI 없이 안정적으로 계산 가능한 항목만 저장한다.
 
 예:
 
 ```ts
-const RETRY_BASE_MS = 1500;
-const MAX_HTTP_ATTEMPTS = 3;
+interface StructuralStats {
+  headingCount: number;
+  sectionCount: number;
+
+  paragraphCount: number;
+  listCount: number;
+
+  blockquoteCount: number;
+  codeBlockCount: number;
+
+  tableCount: number;
+
+  linkCount: number;
+  externalLinkCount: number;
+}
 ```
 
-jitter는 작은 random 범위로 추가한다.
-
-목적은 동시에 재시도하는 client가 정확히 같은 시점에 다시 요청하는 것을 줄이는 것이다.
+필요 이상으로 heuristic stats를 추가하지 않는다.
 
 ---
 
-# 29. Retry 대상
+# 22. Grounding Signals
 
-자동 retry:
-
-```text
-network failure
-408
-500
-502
-503
-504
-```
-
-기존 철학을 유지한다.
-
-`429`는 이번 변경에서 무조건 transient set에 넣지 않는다.
-
-429는:
-
-```text
-rate limit
-quota
-billing
-usage limit
-```
-
-등일 가능성이 있으므로
-현재처럼 사용자에게 요청/사용량/결제 한도를 확인하도록 안내한다.
-
-Retry-After 등 명시적인 지원을 추가하려면 별도 Change Candidate로 기록한다.
-
----
-
-# 30. Timeout semantics 유지
-
-현재 timeout 이후 실제 HTTP 연결 종료 여부가 불명확한 상태를
-안전하게 다루는 로직은 유지한다.
-
-Retry 개선 때문에 timeout safety나 unresolved-attempt recovery를 깨뜨리지 않는다.
-
-Gemini transport layer 전체를 다시 작성하지 않는다.
-
----
-
-# 31. Processing Budget 업데이트
-
-현재 budget에 `maxHttpAttempts` 등이 있다면
-새 retry 최대치와 실제 worst-case request count가 일치하도록 갱신한다.
+Phase 1에서 deterministic하게 확인 가능한 grounding signal은 계속 수집한다.
 
 예:
 
-```text
-logical request 최대 34
-HTTP attempt 최대 logicalRequests × 3
+```ts
+interface GroundingSignals {
+  externalLinkCount: number;
+
+  footnoteReferenceCount: number;
+
+  blockquoteCount: number;
+
+  tableCount: number;
+
+  referenceSectionCount: number;
+
+  sourceMetadataKeys: string[];
+}
 ```
 
-처럼 실제 계산과 UI 안내가 맞아야 한다.
+Grounding Signal은:
 
-고정 숫자를 서로 다른 파일에 중복 작성하지 않는다.
+```text
+Information 판정
+```
 
----
+이 아니다.
 
-# 32. Output token 감소 기대
-
-Evidence와 label이 사라지므로
-Gemini response schema와 output이 크게 줄어든다.
-
-이를 이용해 불필요하게 `maxOutputTokens`를 바로 낮추지는 않는다.
-
-먼저 실제 usage 기록을 수집한다.
-
-Generation config 조정은 이번 변경과 분리한다.
+단순 관찰값이다.
 
 ---
 
-# 33. Frame Schema version
+# 23. Phase 2 Context Builder 도입
 
-현재 Gemini Concept Frame이 기존 Evidence schema를 사용하고 있다면
-새 schema version으로 명확히 올린다.
+Structural Frame과 별도로
+Phase 2를 위한 Context Builder를 구현한다.
 
 예:
 
-```text
-schemaVersion: 5
+```ts
+buildContextUnits(
+  source: string,
+  structuralFrame: StructuralFrame,
+  budget: ContextBudget
+): ContextUnit[]
 ```
 
-실제 번호는 repository의 version history를 확인해 충돌 없이 결정한다.
-
-새 Frame과 이전 Evidence 기반 Frame을 동일 schema version으로 저장하지 않는다.
+정확한 API는 repository style에 맞춘다.
 
 ---
 
-# 34. 기존 Frame migration
+# 24. Context Unit은 저장되는 Knowledge Unit이 아니다
 
-기존 Evidence 기반 Concept Frame을
-새 Frame으로 자동 변환할 수 있는 경우:
+매우 중요하다.
 
 ```text
-concept name
-confidence
-highlight
+Context Unit
 ```
 
-만 안전하게 가져오는 lightweight migration은 허용한다.
+은 Gemini 입력을 위한 processing artifact다.
 
-Evidence와 labels는 폐기한다.
+영구 Knowledge Unit이 아니다.
 
-하지만 migration 복잡도가 높으면
-legacy Frame으로 읽고 재-Framing을 요구해도 된다.
+따라서 기존의:
 
-이미 존재하는 사용자 annotation을 조용히 잃는 migration은 하지 않는다.
+```text
+knowledgeUnits
+```
 
-현재 저장 데이터의 실제 상태를 먼저 확인한다.
+개념을 부활시키지 않는다.
 
 ---
 
-# 35. UI 변경
+# 25. Context Unit 생성 우선순위
 
-Frame Review에서 Concept은 다음 정도만 보여준다.
-
-```text
-Domain
-Finance → Investing
-
-Content Nature
-정보
-
-Key Concepts
-- 효율적 시장 가설
-- 분산투자
-- 체계적 위험
-- CAPM
-- 행동재무학
-```
-
-더 이상 Concept 아래에:
+Context Builder는 다음 순서를 따른다.
 
 ```text
-Evidence
-source excerpt
-line range
-semantic labels
+1. Section 전체가 budget에 들어가는지 확인
+
+2. 들어가면 Section 전체를 하나의 Context Unit으로 사용
+
+3. 너무 크면 child Section 기준으로 분할
+
+4. child Section으로도 해결되지 않으면
+   structural block 단위로 분할
+
+5. block도 너무 크면
+   안전한 내부 boundary 사용
+
+6. 정말 마지막 수단에서만
+   sentence / line boundary 사용
 ```
 
-를 보여주지 않는다.
+핵심:
+
+> Byte limit은 처음부터 문서를 자르는 기준이 아니라,
+> 의미 구조 보존 후 적용되는 최후의 제약이다.
 
 ---
 
-# 36. Content Nature UI
+# 26. Section 전체를 가능한 한 유지
 
-사용자에게 enum raw value 대신 다음을 표시한다.
+예:
 
-```text
-information  → 정보
-opinion      → 의견
-mixed        → 정보 + 의견
-unclassified → 분류 어려움
+```markdown
+## CAPM
+
+CAPM은 ...
+
+베타는 ...
+
+베타가 높으면 ...
+
+따라서 ...
 ```
 
-Developer Details에는 raw JSON을 표시해도 된다.
+전체가 budget 안에 들어간다면
+하나의 Context Unit으로 유지한다.
+
+문단마다 Gemini 요청을 만들지 않는다.
 
 ---
 
-# 37. Highlight 유지
+# 27. Parent Heading Context 복원
 
-기존 Concept Highlight는 유지한다.
+Child Section을 독립 Context Unit으로 보낼 경우
+부모 Heading 경로를 함께 제공한다.
 
-사용자가:
+예:
 
-```text
-이 Concept은 특히 중요함
+Raw section:
+
+```markdown
+### 강형 효율성
+
+강형 효율성 시장에서는...
 ```
 
-을 표시할 수 있는 구조는 계속 지원한다.
+AI Context에는 가능하면:
 
----
+```markdown
+# 투자 이론
+## 효율적 시장 가설
+### 강형 효율성
 
-# 38. Confidence
-
-Confidence는 유지해도 되지만
-Primary UI에서 강조하지 않는다.
-
-Confidence는 모델 자체 평가일 뿐
-정확성 확률이 아니다.
-
-Developer Details 또는 보조 정보로만 취급한다.
-
----
-
-# 39. PRD 수정
-
-현재 문서에서 다음 개념을 찾아 새 구조와 일치하도록 수정한다.
-
-특히:
-
-```text
-Document Type Classification
-Knowledge Concept Extraction
-Evidence Linking
-Semantic Classification
-Knowledge Unit / Concept Highlight
-Frame Generation
-Human Correction
-Acceptance Criteria
-Open Decisions
-Edge Cases
+강형 효율성 시장에서는...
 ```
 
-Evidence 관련 requirement와 acceptance criterion은 제거하거나 새 방향으로 재작성한다.
+형태로 전달한다.
 
-단순히 용어만 바꾸지 않는다.
-
-observable behavior를 새 제품 정의와 맞춘다.
+즉 모델이 현재 내용이 문서 전체에서 어디에 위치하는지 알 수 있어야 한다.
 
 ---
 
-# 40. Project Brief 수정
+# 28. Context Wrapper와 Source Text 구분
 
-제품 핵심을 다음 방향으로 정리한다.
+부모 Heading을 Context Unit에 복원할 때
+원문을 변조하지 않는다.
 
-기존:
+예를 들어 내부 표현은:
+
+```ts
+interface ContextUnit {
+  id: string;
+
+  sectionId: string;
+
+  headingPath: string[];
+
+  sourceRanges: SourceRange[];
+
+  renderedMarkdown: string;
+}
+```
+
+처럼 할 수 있다.
+
+`renderedMarkdown`은 AI를 위한 context representation이며
+Raw Markdown 자체를 수정하거나 저장하지 않는다.
+
+---
+
+# 29. Markdown 형태를 AI에게 적극적으로 유지
+
+2단계 Gemini input에서 가능한 한:
+
+```json
+{
+  "headingContext": [...],
+  "blocks": [...]
+}
+```
+
+만 전달하는 것보다,
+
+필요한 경우 Markdown hierarchy를 사람이 읽는 것처럼 재구성한:
+
+```markdown
+# 투자 이론
+## 효율적 시장 가설
+### 강형 효율성
+
+...
+```
+
+형태를 함께 사용하는 것을 검토한다.
+
+목표:
+
+> 모델이 특별한 metadata schema를 이해하지 않아도
+> Markdown 구조 자체를 통해 문맥을 파악할 수 있게 한다.
+
+단 Structured Output input contract가 복잡해지지 않도록
+현재 Gemini pipeline과 가장 단순하게 결합되는 방식을 선택한다.
+
+---
+
+# 30. Context 내 block order 보존
+
+Context Unit 내부 source block은 반드시 원문 순서를 유지한다.
 
 ```text
-Concept + Evidence Linking
+paragraph 1
+list
+paragraph 2
+quote
+```
+
+를 임의로 재배열하지 않는다.
+
+Phase 1은 문서를 요약하거나 재구성하는 단계가 아니다.
+
+---
+
+# 31. Context 간 순서도 보존
+
+생성되는 Context Units도 원문 순서를 따른다.
+
+```text
+Context 1
+Context 2
+Context 3
+```
+
+의 순서가 원문 Section 순서와 일치해야 한다.
+
+---
+
+# 32. Overlap 기본 금지
+
+기본적으로 Context Unit끼리 본문을 중복 전달하지 않는다.
+
+Context overlap을 통해 문맥을 유지하려 하지 않는다.
+
+대신:
+
+```text
+parent heading path
+section structure
+```
+
+를 이용한다.
+
+추후 overlap이 필요하다면 Change Candidate로 남긴다.
+
+---
+
+# 33. 아주 큰 Paragraph
+
+하나의 paragraph 자체가 모델 budget보다 큰 경우에만
+내부 split을 허용한다.
+
+우선순위:
+
+```text
+sentence boundary
+↓
+line boundary
+↓
+Unicode-safe hard split
+```
+
+가능하면 문장 경계를 사용하되
+새 복잡한 NLP dependency를 추가하지 않는다.
+
+한국어 문장도 완벽하게 분석하려 하지 않는다.
+
+간단하고 deterministic해야 한다.
+
+---
+
+# 34. 아주 큰 List
+
+List 전체가 budget을 초과하면
+최상위 list item 경계를 기준으로 분할할 수 있다.
+
+하지만:
+
+```text
+한 list item 자체
+```
+
+는 가능한 한 유지한다.
+
+Nested child item은 부모와 함께 유지하려 노력한다.
+
+---
+
+# 35. 아주 큰 Code Block / Table
+
+단일 Code Block 또는 Table이 budget보다 큰 경우
+의미 보존과 API budget이 충돌한다.
+
+이 경우 silent truncation하지 않는다.
+
+정책을 명확히 정의한다.
+
+MVP 권장:
+
+```text
+Oversized atomic block
+→ explicit framing error
+```
+
+또는 안전한 block-specific split이 명확할 경우에만 split한다.
+
+임의 byte slicing은 하지 않는다.
+
+---
+
+# 36. 기존 structuralChunks() 재설계
+
+현재 `structuralChunks()`는:
+
+```text
+extract blocks
+→ oversized block byte split
+→ heading-aware packing
+→ byte/block limit flush
+```
+
+방식이다.
+
+이 로직을 그대로 확장만 하지 않는다.
+
+역할을 분리한다.
+
+권장 구조:
+
+```text
+parseMarkdownStructure()
+        ↓
+StructuralFrame
+
+buildContextUnits()
+        ↓
+ContextUnit[]
+
+prepareGeminiInput()
+```
+
+---
+
+# 37. Parser와 Context Builder 분리
+
+가능하면:
+
+```text
+Markdown parser
+```
+
+와:
+
+```text
+AI context packing
+```
+
+을 별도 module로 분리한다.
+
+이유:
+
+Structural Frame은 안정적인 문서 구조이고,
+
+Context packing은:
+
+```text
+model
+context budget
+prompt design
+```
+
+에 따라 바뀔 수 있기 때문이다.
+
+---
+
+# 38. 기존 Gemini pipeline 연결
+
+현재 Gemini Framing에서 사용하는
+chunk extraction logic은 최대한 유지한다.
+
+다만 입력 chunk 생성 source를:
+
+```text
+old structuralChunks()
 ```
 
 에서:
 
 ```text
-Domain Classification
-+
-Content Nature Classification
-+
-Key Concept Indexing
+Markdown-aware Context Builder
 ```
 
-으로 변경한다.
+로 교체할 수 있는 구조를 만든다.
+
+이번 작업에서 Gemini semantic prompt 자체를 크게 수정하지 않는다.
 
 ---
 
-# 41. MVP Plan 수정
+# 39. Context Unit에 Structure Metadata 포함
 
-Concept-Based Framing 단계의 학습 결과를 기록한다.
+각 AI Context Unit에는 최소한:
+
+```text
+contextUnitId
+sectionId
+headingPath
+source line range
+byte length
+```
+
+를 내부적으로 보존한다.
+
+Attempt Journal에도 가능하면:
+
+```text
+contextUnitId
+sectionId
+```
+
+를 추적 가능하게 한다.
+
+---
+
+# 40. Heading 없는 긴 문서 fallback
+
+Heading이 없는 긴 문서에서는:
+
+```text
+Root Section
+↓
+Paragraph/List/etc Blocks
+↓
+Block groups
+```
+
+방식으로 Context를 만든다.
+
+문단 경계를 우선한다.
+
+다음처럼 하지 않는다.
+
+```text
+16 KiB
+16 KiB
+16 KiB
+```
+
+blind byte slicing.
+
+---
+
+# 41. 작은 Section 병합
+
+너무 짧은 Section이 여러 개 연속될 경우
+각각 별도 AI request를 보내지 않아도 된다.
+
+조건:
+
+```text
+전체 budget 내
+원문 순서 유지
+상위 문맥이 호환됨
+```
+
+이면 인접 Section을 한 Context Unit에 묶을 수 있다.
 
 예:
 
 ```text
-Evidence linking was tested and intentionally removed.
-
-Reason:
-document-wide concepts made evidence spans excessively broad,
-and the complexity did not provide enough MVP value.
+H2 A — 200 bytes
+H2 B — 300 bytes
+H2 C — 400 bytes
 ```
 
-역사적 결정을 삭제하지 말고
-왜 단순화했는지 남긴다.
+를 하나의 Context Unit으로 묶는 것이 가능하다.
+
+단 서로 다른 최상위 주제가 섞이지 않도록
+parent hierarchy를 고려한다.
 
 ---
 
-# 42. Prompt versioning
+# 42. 큰 Section 분해와 작은 Section 병합을 모두 지원
 
-최소 다음 version을 올린다.
+Context Builder의 목표는:
 
 ```text
-concept extraction prompt
-document classification prompt
-concept extraction schema
-document classification schema
-pipeline version
+너무 큰 의미 단위는 안전하게 분할
+너무 작은 의미 단위는 자연스럽게 병합
 ```
 
-Consolidation prompt도 source-language rule이 변경되므로 version을 올린다.
+이다.
 
-Evaluation trace에서 새 version을 확인할 수 있어야 한다.
+단순 one-section-one-request 규칙으로 고정하지 않는다.
 
 ---
 
-# 43. Tests — Source language
+# 43. Context Unit Quality 목표
 
-다음 테스트를 추가한다.
+좋은 Context Unit은:
 
-## Korean source
+```text
+한 가지 또는 밀접한 주제 흐름을 포함
+Markdown 구조가 유지됨
+본문이 중간에서 끊기지 않음
+상위 제목 문맥을 알 수 있음
+budget을 넘지 않음
+```
+
+이어야 한다.
+
+---
+
+# 44. Context Unit은 의미 분류를 하지 않는다
+
+Phase 1 Context Builder에서:
+
+```text
+이 Section은 CAPM
+이 Section은 의견
+이 Section은 중요한 내용
+```
+
+같은 semantic inference를 하지 않는다.
+
+Markdown structure만 사용한다.
+
+---
+
+# 45. Local Inspection UI
+
+Phase 1 Frame inspection에서 최소한 다음을 볼 수 있게 한다.
+
+```text
+Document
+
+Sections
+- heading path
+- line range
+- byte length
+
+Structural Stats
+
+Grounding Signals
+
+Semantic
+- 아직 실행되지 않음
+```
+
+개발자 확인을 위해
+Section Tree를 읽기 쉽게 표시하면 좋다.
+
+---
+
+# 46. Optional Developer Preview
+
+필요하면 Developer Details에서:
+
+```text
+예상 AI Context Units
+```
+
+를 preview할 수 있다.
+
+예:
+
+```text
+Context 1
+투자 이론 → 효율적 시장 가설
+Lines 1–74
+8.2 KiB
+
+Context 2
+투자 이론 → 행동재무학
+Lines 75–122
+5.4 KiB
+```
+
+이 기능이 구현 부담이 크다면 이번 scope에서 제외할 수 있다.
+
+Change Candidate로 남겨도 된다.
+
+---
+
+# 47. Phase 1 Source Identity
+
+Structural Frame은 원문 version과 연결되어야 한다.
+
+가능하면 기존 source hash 방식을 재사용한다.
+
+예:
+
+```text
+sourceHash
+hashEncoding
+```
+
+Phase 1 Frame이 현재 Markdown version과 일치하는지 검증 가능해야 한다.
+
+---
+
+# 48. 기존 Source Preservation 원칙 유지
+
+Phase 1 Framing은 절대로:
+
+```text
+원문 수정
+자동 heading 삽입
+paragraph 재작성
+formatting 변경
+```
+
+을 하지 않는다.
+
+Markdown은 read-only source다.
+
+---
+
+# 49. Frame Schema Version
+
+기존 local schemaVersion 1과 구분한다.
+
+새 Structural Frame은 새 schema version을 사용한다.
+
+정확한 번호는 repository 전체 version history를 확인해서 정한다.
+
+---
+
+# 50. Storage Migration
+
+기존:
+
+```text
+local-test-v1
+```
+
+Frame에는 meaningful human annotation이 없다.
+
+따라서 복잡한 automatic migration을 만들지 않는다.
+
+새 local framing을 실행하면:
+
+```text
+local-structural-v1
+```
+
+결과로 교체할 수 있다.
+
+---
+
+# 51. 테스트 — Heading Hierarchy
 
 입력:
 
-```text
-효율적 시장 가설과 분산투자에 대해 설명한다.
+```markdown
+# A
+
+## B
+
+### C
+
+## D
 ```
 
-Concept 결과가 다음과 같은 한국어 표현을 허용/기대한다.
+기대:
 
 ```text
-효율적 시장 가설
-분산투자
+A
+├─ B
+│  └─ C
+└─ D
 ```
 
-영어 번역을 prompt expectation으로 사용하지 않는다.
+각 Section의 headingPath가 정확해야 한다.
 
 ---
 
-# 44. Tests — English source
+# 52. 테스트 — Code Fence 보호
 
 입력:
 
-```text
-This note explains Behavioral Finance and Risk Parity.
-```
+````markdown
+# Real Heading
 
-Concept은 영어 표현을 유지해야 한다.
+```markdown
+# Fake Heading
+- fake list
+```
+````
+
+`Fake Heading`은 Section으로 생성되지 않는다.
 
 ---
 
-# 45. Tests — Korean + acronym
+# 53. 테스트 — List Atomicity
 
-입력:
+긴 list가 budget 안에 있으면
+한 Context Unit 안에서 유지되어야 한다.
 
-```text
-자본자산 가격결정 모형(CAPM)을 이용한다.
-```
-
-Concept 이름이 원문의 표현을 보존할 수 있어야 한다.
+List item 중간에서 분리하지 않는다.
 
 ---
 
-# 46. Tests — Evidence 없는 Concept
+# 54. 테스트 — Table Atomicity
 
-다음 응답은 정상 validation을 통과해야 한다.
+budget 안의 table은
+row 중간에서 분리하지 않는다.
+
+---
+
+# 55. 테스트 — Section 유지
+
+Section 전체가 budget 안이면:
+
+```text
+one Section
+→ one complete context
+```
+
+가 가능해야 한다.
+
+문단 단위로 불필요하게 분해하지 않는다.
+
+---
+
+# 56. 테스트 — Child Section Split
+
+부모 Section이 너무 크고
+여러 child Section이 있을 경우:
+
+```text
+child Sections
+```
+
+기준으로 분할해야 한다.
+
+---
+
+# 57. 테스트 — Heading Context
+
+Child Section이 독립 Context가 되더라도:
+
+```text
+headingPath
+```
+
+에 모든 필요한 parent heading이 포함된다.
+
+---
+
+# 58. 테스트 — Heading 없는 긴 문서
+
+Heading이 없더라도:
+
+```text
+paragraph boundary
+list boundary
+```
+
+를 존중하며 여러 Context Unit을 만든다.
+
+blind byte split을 하지 않는다.
+
+---
+
+# 59. 테스트 — Oversized Paragraph
+
+단일 paragraph가 budget을 넘는 경우:
+
+```text
+sentence/line fallback
+```
+
+으로 deterministic하게 나뉜다.
+
+Unicode 문자열을 손상시키지 않는다.
+
+---
+
+# 60. 테스트 — 원문 순서
+
+Structural blocks와 Context Units 모두
+원문 순서를 유지한다.
+
+---
+
+# 61. 테스트 — Source Coverage
+
+정상 prose/document content는 Context 생성 시:
+
+```text
+누락 없이
+중복 없이
+```
+
+Source range로 추적 가능해야 한다.
+
+단 context heading wrapper는 source text coverage 계산에서 제외한다.
+
+---
+
+# 62. 테스트 — No Semantic Fields
+
+Local Structural Frame에는 다음 semantic result가 없어야 한다.
+
+```text
+domains
+contentNature
+concepts
+knowledgeUnits
+AI confidence
+```
+
+다음만 존재:
 
 ```json
 {
-  "concepts": [
-    {
-      "concept": "분산투자",
-      "confidence": 0.9
-    }
-  ]
+  "semantic": {
+    "status": "not-run"
+  }
 }
 ```
 
-Evidence가 없다는 이유로 실패하면 안 된다.
+---
+
+# 63. 테스트 — Grounding Signals
+
+Markdown의:
+
+```text
+external link
+footnote
+blockquote
+reference heading
+source frontmatter
+```
+
+를 deterministic하게 검출한다.
+
+이 값으로 Content Nature를 자동 결정하지 않는다.
 
 ---
 
-# 47. Tests — Content Nature
+# 64. Regression
 
-최소 다음을 테스트한다.
-
-```text
-pure factual explanation
-→ information
-
-personal argument
-→ opinion
-
-substantial factual explanation + substantial personal judgment
-→ mixed
-
-meaningless/insufficient content
-→ unclassified
-```
-
----
-
-# 48. Tests — mixed 남용 방지
-
-다음 유형의 fixture를 추가한다.
+반드시 다음 기존 기능을 깨뜨리지 않는다.
 
 ```text
-긴 정보 문서 + 마지막 한 줄 개인 감상
-→ information
-```
+Manual wait queue
+Local frame persistence
+file rename/delete invalidation
+unsaved editor content handling
 
-그리고:
-
-```text
-긴 개인 의견 + 짧은 사실 인용
-→ opinion
-```
-
-Prompt evaluation fixture로 두어도 된다.
-
----
-
-# 49. Tests — Concept validation
-
-다음은 실패:
-
-```text
-empty concept
-whitespace-only concept
-control characters
-confidence outside 0..1
-too many concepts
-```
-
-다음은 더 이상 테스트하지 않는다.
-
-```text
-invalid evidence block ID
-non-contiguous evidence
-duplicate evidence block
-invalid semantic label
-```
-
-해당 코드 자체를 제거한다.
-
----
-
-# 50. Tests — 503 retry
-
-Gemini transport mock으로 확인한다.
-
-## Case A
-
-```text
-503
-→ 200
-```
-
-성공.
-
-## Case B
-
-```text
-503
-→ 503
-→ 200
-```
-
-성공.
-
-## Case C
-
-```text
-503
-→ 503
-→ 503
-```
-
-최종 실패.
-
-## Case D
-
-```text
-400
-```
-
-자동 retry 없음.
-
-## Case E
-
-```text
-429
-```
-
-현재 정책대로 자동 retry 하지 않음.
-
----
-
-# 51. Retry 테스트에서 실제 sleep 금지
-
-Unit test에서는 실제 수 초를 기다리지 않는다.
-
-현재 GeminiClient가 sleep dependency를 주입받을 수 있는 구조라면
-그 구조를 유지하여 fake sleep으로 검증한다.
-
-jitter도 deterministic injection이 필요하면
-작은 dependency로 분리한다.
-
-production code를 과도하게 추상화하지 않는다.
-
----
-
-# 52. Regression
-
-반드시 다음 기능을 회귀 테스트한다.
-
-```text
+Gemini API
+Domain Catalog
 Domain reuse
-New Domain proposal
 Domain approval
-Domain persistence
 
-Structural long-document chunking
-Exact Concept duplicate merge
-Semantic Concept consolidation
+Concept extraction
+Korean concept preservation
+Concept consolidation
 
-Gemini timeout handling
+Content Nature
 Attempt Journal
-Usage metadata
+503 retry
+timeout handling
 SecretStorage
-Stale result rejection
-Source hash/evaluation trace
-Frame persistence
 ```
 
 ---
 
-# 53. 이번 변경에서 하지 않을 것
+# 65. 이번 작업에서 하지 않을 것
 
-다음을 추가하지 않는다.
+이번 작업 범위에서는 다음을 구현하지 않는다.
 
 ```text
-Embeddings
+Content Nature 정확도 개선
+Grounding-aware AI classification
+Human Review
+Ambiguity policy
+
+Hierarchical Concept consolidation
+candidate budget 개선
+
+Embedding
 Vector DB
-Concept graph
-Ontology
-Keyword translation table
-Multilingual synonym database
-Automatic language translation
-Evidence scoring
-Sentence-level evidence extraction
-Fact verification
-Summary generation
-Decision/Idea signals
-RAG implementation
+RAG
+Knowledge Graph
+Fact checking
+
+Semantic chunking with AI
 ```
 
-필요성이 발견되면 Change Candidate로만 기록한다.
+이 작업의 범위는:
+
+> Markdown-Aware Phase 1 Structural Framing + Phase 2 Context Builder 기반
+
+까지만이다.
 
 ---
 
-# 54. 코드 수정 원칙
-
-Repository에 TypeScript source가 존재한다면
-bundled `main.js`를 직접 source of truth로 수정하지 않는다.
-
-다음과 같은 실제 source module을 수정하고
-정상 build를 통해 `main.js`를 재생성한다.
-
-예상 관련 파일:
+# 66. 권장 구현 순서
 
 ```text
-src/classification.ts
-src/classification-prompt.ts
-src/concept-prompts.ts
-src/concepts.ts
-src/framing.ts
-src/gemini.ts
-src/budget.ts
-src/main.ts
-관련 UI module
-관련 tests
-```
+1. 기존 TestEngine / extractBlocks / structuralChunks 검토
 
-실제 repository 구조를 먼저 확인한다.
+2. Markdown structural model 정의
+
+3. parseMarkdownStructure 구현
+
+4. Section Tree 생성
+
+5. Structural Blocks 생성
+
+6. Structural Stats / Grounding Signals
+
+7. local-structural-v1 Frame
+
+8. Context Builder 구현
+
+9. Section-first packing
+
+10. child-section fallback
+
+11. block-level fallback
+
+12. oversized paragraph fallback
+
+13. Gemini pipeline에 Context Unit 연결
+
+14. UI 수정
+
+15. Tests
+
+16. Docs reconciliation
+
+17. Build / verification
+```
 
 ---
 
-# 55. 권장 구현 순서
+# 67. 완료 기준
+
+이번 작업은 다음 조건을 만족해야 완료다.
 
 ```text
-1. 현재 source/tests/docs 확인
+기존 TEST_ONLY Knowledge Unit이 제거된다.
 
-2. PRD / Brief / Plan 변경
+local-test-v1이 local-structural-v1으로 교체된다.
 
-3. Content Nature taxonomy 도입
+Markdown Heading hierarchy가 Section Tree로 변환된다.
 
-4. Evidence + Semantic Label schema 제거
+Paragraph / List / Quote / Code / Table 등이
+구조적으로 구분된다.
 
-5. Concept validator 단순화
+긴 문서를 blind byte slicing하지 않는다.
 
-6. Source-language-first extraction prompt
+Section 전체가 budget 안이면 흐름을 유지한다.
 
-7. Source-language-preserving consolidation prompt
+큰 Section은 child Section을 우선하여 분해한다.
 
-8. Framing orchestration 정리
+AI Context Unit에 parent Heading context가 보존된다.
 
-9. Frame schema version 변경
+Heading 없는 문서도 paragraph/block boundary를 이용한다.
 
-10. Review UI 단순화
+Local Frame은 semantic inference를 하지 않는다.
 
-11. 503 retry/backoff 강화
+Phase 2 Gemini가 새 Context Builder의 결과를 사용할 수 있다.
 
-12. Processing budget 갱신
-
-13. Tests
-
-14. Build
-
-15. Documentation reconciliation
+기존 semantic framing 기능에 regression이 없다.
 ```
 
 ---
 
-# 56. 최종 완료 조건
+# 68. 완료 보고 형식
 
-다음이 모두 만족되어야 한다.
+완료 후 다음 순서로 보고한다.
 
-```text
-한국어 문서에서
-한국어 Concept이 자연스럽게 생성된다.
+1. 기존 local framing / structuralChunks 문제점
+2. 새 Phase 1 제품 정의
+3. Structural Frame schema
+4. Markdown parser 구조
+5. Section Tree 규칙
+6. Structural Block 종류와 규칙
+7. Grounding Signals
+8. Context Builder architecture
+9. Section-first packing 전략
+10. oversized content fallback 전략
+11. parent Heading context 보존 방법
+12. Gemini pipeline 연결 변경
+13. storage/schema 변경
+14. UI 변경
+15. 수정 source files
+16. 추가 tests
+17. verification commands
+18. build/test 결과
+19. 실제 긴 Markdown 테스트 결과
+20. Open Decisions
+21. 구현하지 않은 Change Candidates
 
-원문 영어 용어는 영어 그대로 유지된다.
-
-Concept에 Evidence가 존재하지 않는다.
-
-Evidence 관련 validation 오류가 사라진다.
-
-Semantic Evidence Label이 Frame에서 제거된다.
-
-Document가
-information / opinion / mixed / unclassified
-중 하나로 분류된다.
-
-mixed가 사소한 정보/의견 혼재 때문에 남용되지 않는다.
-
-긴 문서는 기존 structural chunking으로 계속 처리된다.
-
-chunk 간 Concept 중복은 계속 통합된다.
-
-Domain lifecycle은 그대로 정상 작동한다.
-
-503 transient failure는
-최대 3 attempts 내에서 bounded backoff 후 재시도된다.
-
-영구 오류나 429를 무한 재시도하지 않는다.
-
-저장된 Frame schema와 UI가 새 구조와 일치한다.
-```
-
----
-
-# 57. 작업 완료 보고
-
-작업 완료 후 다음 순서로 보고한다.
-
-1. 기존 Evidence 구조에서 제거한 부분
-2. 새 Frame schema
-3. Content Nature taxonomy
-4. Source-language-first Concept 규칙
-5. Concept extraction prompt 변경
-6. Concept consolidation 변경
-7. validator 단순화
-8. 503 retry/backoff 변경
-9. Processing budget 변경
-10. 저장/migration 변경
-11. UI 변경
-12. 수정한 문서
-13. 수정한 source files
-14. 추가/수정한 tests
-15. 실행한 verification commands
-16. build/test 결과
-17. 아직 남은 Open Decisions
-18. 구현하지 않은 Change Candidates
-
-추가 기능을 임의로 확장하지 않는다.
+임의로 기능 범위를 확장하지 않는다.

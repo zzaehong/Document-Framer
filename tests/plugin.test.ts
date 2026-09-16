@@ -23,6 +23,7 @@ function harness() {
   const settings: any[] = [];
   const modals: any[] = [];
   let settingsTab: any;
+  let viewFactory: (leaf: any) => any;
   let responder = async (request: HttpRequest): Promise<HttpResponse> => {
     const input = JSON.parse(JSON.parse(request.body).contents[0].parts[0].text);
     return { status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({
@@ -69,16 +70,16 @@ function harness() {
     };
     loadData = async () => saved;
     saveData = async (value: unknown) => { if (failSave) throw new Error('disk full'); saved = structuredClone(value); };
-    registerView() {} addRibbonIcon() {} addCommand() {} registerEvent() {} registerInterval() {} addSettingTab(tab: unknown) { settingsTab = tab; }
+    registerView(_type: string, factory: (leaf: any) => any) { viewFactory = factory; } addRibbonIcon() {} addCommand() {} registerEvent() {} registerInterval() {} addSettingTab(tab: unknown) { settingsTab = tab; }
   }
   // 번들을 별도 실행 문맥에서 로드하고 모듈·시계·HTTP를 위 테스트용 구현에 연결한다.
-  const context = { module: { exports: {} as any }, require: () => ({ Plugin, TFile, ItemView: class {}, Modal, MarkdownView: class {}, Notice: class {}, Setting,
+  const context = { module: { exports: {} as any }, require: () => ({ Plugin, TFile, ItemView: class { contentEl = new Element(); app: any; constructor(leaf: any) { this.app = leaf.app; } }, Modal, MarkdownView: class {}, Notice: class {}, Setting,
     PluginSettingTab: class { containerEl = new Element(); },
     requestUrl: async (request: HttpRequest) => { requests.push(request); return responder(request); },
   }), window: { setInterval: () => 1 }, TextEncoder, crypto: webcrypto, structuredClone, setTimeout, clearTimeout, Date: class extends Date { static now() { return now; } } };
   vm.runInNewContext(code, context);
   const create = () => new context.module.exports.default();
-  return { create, file, createFile: () => new TFile(), events, vaultEvents, secrets, requests, settings, modals, get settingsTab() { return settingsTab; },
+  return { create, createView: (app: any) => viewFactory({ app }), file, createFile: () => new TFile(), events, vaultEvents, secrets, requests, settings, modals, get settingsTab() { return settingsTab; },
     respond(fn: typeof responder) { responder = fn; }, seed(value: unknown) { saved = value; },
     get content() { return content; }, set content(value: string) { content = value; }, advance(ms: number) { now += ms; }, failSave() { failSave = true; }, recoverSave() { failSave = false; }, get saved() { return saved; } };
 }
@@ -110,7 +111,7 @@ test('plugin request → waiting → generation → persistence → reload; sour
   const original = h.content;
   await plugin.request(); assert.equal(h.saved, null);
   h.advance(59_999); await plugin.tick(); assert.equal(h.saved, null);
-  h.advance(1); await plugin.tick(); assert.equal(plugin.frames['test.md'].engine, 'local-test-v1');
+  h.advance(1); await plugin.tick(); assert.equal(plugin.frames['test.md'].engine, 'local-structural-v1');
   assert.equal(h.content, original);
   const reloaded = h.create(); await reloaded.onload();
   assert.equal(reloaded.frames['test.md'].document.title, '테스트');
@@ -258,7 +259,7 @@ test('restarted plugin shows unresolved request, requires explicit risk acknowle
   finish({ status: 200, text: '{}' }); await new Promise(resolve => setImmediate(resolve));
   assert.equal(JSON.stringify(h.saved), acknowledged);
   h.respond(async request => {
-    const blocks = JSON.parse(JSON.parse(request.body).contents[0].parts[0].text).blocks;
+
     return { status: 200, text: JSON.stringify({ usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 10, totalTokenCount: 30 }, modelVersion: 'gemini-3.1-flash-lite', candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ domains: [{ path: ['Other'], source: 'unclassified', confidence: 0 }], contentNature: { id: 'opinion', confidence: 0 }, concepts: [{ concept: 'Reusable concept', confidence: 0.7 }] }) }] } }] }) };
   });
   await next.request(true);
@@ -320,11 +321,11 @@ test('AC-B/C/F/G: structured review approves only the chosen candidate and reuse
   assert.ok(!visible.includes('Evidence'));
   assert.ok(!visible.includes(original));
   for (const text of ['Domain', 'Economics', 'Science → Biology → Genetics', '새 Domain 후보', 'Content Nature', '정보', 'Key Concepts', 'Reusable concept']) assert.ok(visible.includes(text), text);
-  for (const text of ['confidence', '0.91', '0.83', preview.frame.evaluation.runId, 'gemini-3.1-flash-lite-001', 'concept-extraction-v2', 'schemaVersion']) assert.ok(!visible.includes(text), text);
+  for (const text of ['confidence', '0.91', '0.83', preview.frame.evaluation.runId, 'gemini-3.1-flash-lite-001', 'concept-extraction-v3', 'schemaVersion']) assert.ok(!visible.includes(text), text);
   const details = descendants(modal.contentEl).find(el => el.tag === 'details');
   assert.equal(details.open, false);
   const developer = descendants(details).map(el => el.text).join('\n');
-  for (const text of ['Developer Details', 'confidence', '0.91', preview.frame.evaluation.runId, 'gemini-3.1-flash-lite-001', 'concept-extraction-v2', 'concept-extraction-schema-v2', 'domainCatalogHash']) assert.ok(developer.includes(text), text);
+  for (const text of ['Developer Details', 'confidence', '0.91', preview.frame.evaluation.runId, 'gemini-3.1-flash-lite-001', 'concept-extraction-v3', 'concept-extraction-schema-v2', 'domainCatalogHash']) assert.ok(developer.includes(text), text);
   const approve = descendants(modal.contentEl).find(el => el.text === '승인');
   approve.onclick();
   await waitFor(() => plugin.store.getDomains().length === 1);
@@ -464,5 +465,38 @@ test('Content Nature review displays all four Korean names without raw enum or e
     assert.ok(visible.includes(label)); assert.ok(visible.includes('분산투자'));
     for (const hidden of [id, 'Evidence', 'confidence', '0.87', 'Document Type', h.content]) assert.ok(!visible.includes(hidden), hidden);
     plugin.onunload();
+  }
+});
+
+// 구조 결과는 사람이 읽는 기본 화면에 표시하고 저장 JSON은 개발 정보로 분리한다.
+test('local inspection shows section paths, stats and grounding without semantic results', async () => {
+  const h = harness(); const plugin = h.create(); await plugin.onload();
+  h.content = '# 투자\n\n## 이론\n\n본문 [출처](https://example.invalid)';
+  await plugin.request(); h.advance(60_000); await plugin.tick();
+  const view = h.createView(plugin.app); view.render();
+  const visible = descendants(view.contentEl, false).map(el => el.text).join('\n');
+  for (const expected of ['Document', 'Sections', '투자 → 이론', 'Structural Stats', 'Grounding Signals', 'Semantic', '아직 실행되지 않음', 'bytes']) assert.ok(visible.includes(expected), expected);
+  for (const absent of ['TEST_ONLY', 'knowledgeUnits', 'Content Nature', 'sourceHash', 'https://example.invalid']) assert.ok(!visible.includes(absent), absent);
+  assert.equal(h.requests.length, 0); // API 키 없이 수행된 정식 Phase 1 처리다.
+  assert.equal(plugin.frames['test.md'].semantic.status, 'not-run');
+});
+
+test('local hashing completion after delete, rename or unload cannot publish a structural frame', async () => {
+  for (const change of ['delete', 'rename', 'unload']) {
+    const h = harness(); const plugin = h.create(); await plugin.onload(); h.advance(60_000);
+    const original = plugin.engine.generate.bind(plugin.engine);
+    let finish!: () => void;
+    plugin.engine.generate = async (source: unknown) => {
+      const frame = await original(source);
+      await new Promise<void>(resolve => { finish = resolve; });
+      return frame;
+    };
+    const pending = plugin.request(); await waitFor(() => !!finish);
+    if (change === 'delete') h.vaultEvents.delete(h.file);
+    else if (change === 'rename') { h.file.path = 'renamed.md'; h.vaultEvents.rename(h.file, 'test.md'); }
+    else plugin.onunload();
+    finish(); await pending;
+    assert.equal(h.saved, null); assert.equal(plugin.frames['test.md'], undefined);
+    assert.ok(!plugin.statuses.get('test.md')?.includes('저장 완료'));
   }
 });

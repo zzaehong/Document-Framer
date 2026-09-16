@@ -31,9 +31,9 @@ test('retries, connection and classification have independent attempt records an
   assert.equal(second.trace?.sourceHash, createHash('sha256').update(source.text, 'utf8').digest('hex'));
   assert.equal(second.trace?.runId, preview.frame.evaluation.runId);
   assert.equal(preview.frame.modelVersion, 'gemini-3.1-flash-lite-001');
-  assert.equal(second.trace?.promptVersion, 'concept-extraction-v2');
+  assert.equal(second.trace?.promptVersion, 'concept-extraction-v3');
   assert.equal(second.trace?.taxonomyVersion, 'domain-policy-v1/content-nature-v1');
-  assert.equal(second.trace?.segmenterVersion, 'markdown-blocks-v1');
+  assert.equal(second.trace?.segmenterVersion, 'markdown-blocks-v2');
   assert.deepEqual(second.trace?.generationConfig, GENERATION_CONFIG);
   assert.ok(second.durationMs !== null && second.durationMs >= 0);
   await framer.checkConnection('dummy-secret');
@@ -141,9 +141,9 @@ test('invalidation during HTTP suppresses retry while preserving returned usage'
 // 호출 기록·Frame·설정의 저장이 겹쳐도 각 데이터를 보존하는지 확인한다.
 test('journal writes serialize with Frame/settings persistence without replacing either data set', async () => {
   const { FrameStore } = await import('../src/storage');
-  const { TestEngine } = await import('../src/core');
+  const { StructuralEngine } = await import('../src/core');
   const store = new FrameStore(async () => {});
-  const frame = new TestEngine().generate(source);
+  const frame = await new StructuralEngine().generate(source);
   store.load({ version: 1, frames: { 'original.md': frame } });
   const journal = new AttemptJournal(attempts => store.saveAttempts(attempts));
   const client = new GeminiClient(async () => response(), undefined, 1000, journal);

@@ -17,7 +17,7 @@ for (const fixture of framingEvaluation) test(`source-language and content-natur
     const body = JSON.parse(request.body);
     assert.equal(body.systemInstruction.parts[0].text, EXTRACTION_PROMPT);
     const input = JSON.parse(body.contents[0].parts[0].text);
-    assert.ok(input.blocks.every((b: any) => fixture.text.includes(b.text)));
+    assert.equal(input.contextMarkdown, fixture.text);
     return response({ domains: [{ path: ['Other'], source: 'unclassified', confidence: 0 }],
       contentNature: { id: fixture.expected, confidence: 0.8 }, concepts: fixture.concepts.map(concept => ({ concept, confidence: 0.9 })) });
   }));
@@ -54,7 +54,7 @@ test('whole-document nature uses the aggregation response, not a chunk majority,
   const preview = await new GeminiFramer(new GeminiClient(async request => {
     const body = JSON.parse(request.body), input = JSON.parse(body.contents[0].parts[0].text);
     const domains = [{ path: ['Other'], source: 'unclassified', confidence: 0 }];
-    if (input.blocks) return response({ domains, contentNature: { id: ++chunk <= 2 ? 'information' : 'opinion', confidence: 0.8 }, concepts: [] });
+    if (input.contextMarkdown) return response({ domains, contentNature: { id: ++chunk <= 2 ? 'information' : 'opinion', confidence: 0.8 }, concepts: [] });
     assert.equal(body.systemInstruction.parts[0].text, SYSTEM_PROMPT);
     assert.deepEqual(input.chunks.map((c: any) => c.contentNature.id), ['information', 'information', 'opinion']);
     assert.ok(input.chunks.every((c: any) => c.sourceBytes > 0));

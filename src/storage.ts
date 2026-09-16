@@ -2,14 +2,14 @@
  * 영구 저장 계층: data.json의 형식 복원과 순차 저장을 담당한다.
  * 로컬 Frame·설정·호출 기록은 함께 저장하고, API 키는 Obsidian 비밀 저장소로 분리한다.
  */
-import { Frame } from './core';
+import { StructuralFrame, StoredFrame } from './structure';
 import { Attempt, decodeAttempts } from './attempts';
 import { Domain, decodeDomains, domainKey } from './domains';
 
 export const MODEL = 'gemini-3.1-flash-lite';
 export const SECRET_ID = 'document-framer-gemini-api-key';
 export interface Settings { model: typeof MODEL; secretId: typeof SECRET_ID }
-export interface Saved { version: 3; settings: Settings; frames: Record<string, Frame>; attempts: Attempt[]; domains: Domain[] }
+export interface Saved { version: 3; settings: Settings; frames: Record<string, StoredFrame>; attempts: Attempt[]; domains: Domain[] }
 const defaults = (): Saved => ({ version: 3, settings: { model: MODEL, secretId: SECRET_ID }, frames: Object.create(null), attempts: [], domains: [] });
 
 // 처음 실행이면 기본값을 만들고, 기존 데이터는 지원 버전·설정만 받아 현재 저장 구조로 복원한다.
@@ -60,8 +60,11 @@ export class FrameStore {
   }
   saveSettings() { return this.update(current => ({ ...current, settings: { model: MODEL, secretId: SECRET_ID } })); }
   saveAttempts(attempts: Attempt[]) { return this.update(current => ({ ...current, attempts })); }
-  saveFrame(path: string, frame: Frame) {
-    return this.update(current => ({ ...current, frames: Object.assign(Object.create(null), current.frames, { [path]: frame }) }));
+  saveFrame(path: string, frame: StructuralFrame, isValid = () => true) {
+    return this.update(current => {
+      if (!isValid()) throw new Error('원문 요청이 종료되었습니다.');
+      return { ...current, frames: Object.assign(Object.create(null), current.frames, { [path]: frame }) };
+    });
   }
 }
 

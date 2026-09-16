@@ -2,10 +2,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MODEL, FrameStore, GeminiKey, decodeSaved, SECRET_ID } from '../src/storage';
-import { TestEngine } from '../src/core';
-const frame = new TestEngine().generate({ path: 'a.md', basename: 'a', text: '내용', ctime: 0, mtime: 0 });
+import { StructuralEngine } from '../src/core';
+const makeFrame = () => new StructuralEngine().generate({ path: 'a.md', basename: 'a', text: '내용', ctime: 0, mtime: 0 });
 // 구버전 Frame을 보존하며 설정과 Frame의 동시 저장이 데이터 손실 없이 직렬화되는지 확인한다.
 test('legacy migration preserves Frames; settings and Frame writes serialize without loss', async () => {
+  const frame = await makeFrame();
   const writes: unknown[] = [];
   const store = new FrameStore(async value => { writes.push(structuredClone(value)); });
   store.load({ version: 1, frames: { 'a.md': frame } });
@@ -17,6 +18,7 @@ test('legacy migration preserves Frames; settings and Frame writes serialize wit
 });
 // 저장 실패 시 이전 상태를 보존하고 이후 저장은 복구하며 알 수 없는 저장 형식을 거부하는지 확인한다.
 test('failed writes preserve previous state and later writes recover; unknown storage rejected', async () => {
+  const frame = await makeFrame();
   let fail = true;
   const store = new FrameStore(async () => { if (fail) throw new Error('disk'); });
   store.load({ version: 1, frames: { 'a.md': frame } });
@@ -41,6 +43,7 @@ test('keys use only the official secret store; clearing removes usable value, er
 
 // 기본 모델 설정만 이전하고 기존 Frame과 과거 호출의 생성 조건은 유지하는지 확인한다.
 test('previous model settings migrate while Frames and historical attempts remain unchanged', async () => {
+  const frame = await makeFrame();
   const oldAttempt = { id: 'old:1', revision: 1, sessionId: 'old-session', runId: 'old', purpose: 'classification', transport: 'settled', requestedModel: 'gemini-2.5-flash-lite', modelVersion: 'gemini-2.5-flash-lite-001', trace: { generationConfig: { thinkingConfig: { thinkingBudget: 0 }, temperature: 0 } }, usage: { status: 'unknown', tokens: {} } };
   const previous = { version: 2, settings: { model: 'gemini-2.5-flash-lite', secretId: SECRET_ID }, frames: { 'a.md': frame }, attempts: [oldAttempt] };
   let saved: unknown;
@@ -63,4 +66,16 @@ test('legacy schema 4 payload preserves human annotations across settings writes
   await store.saveSettings();
   const next = new FrameStore(async () => {}); next.load(saved);
   assert.deepEqual(next.state.frames['old.md'], legacy);
+});
+
+test('invalidated local result waiting behind another write is never sent to storage', async () => {
+  const frame = await makeFrame();
+  let release!: () => void, writes = 0, valid = true;
+  const store = new FrameStore(async () => { writes++; await new Promise<void>(resolve => { release = resolve; }); });
+  const first = store.saveSettings();
+  await new Promise(resolve => setImmediate(resolve));
+  const pending = store.saveFrame('a.md', frame, () => valid);
+  valid = false; release(); await first;
+  await assert.rejects(pending, /종료/); assert.equal(writes, 1);
+  assert.equal(store.state.frames['a.md'], undefined);
 });

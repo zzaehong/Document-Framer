@@ -6,7 +6,7 @@ import { Classification, validateClassification, RESPONSE_SCHEMA_VERSION } from 
 import { PROMPT_VERSION, SYSTEM_PROMPT } from '../src/classification-prompt';
 import { extractBlocks } from '../src/blocks';
 import { FrameStore, decodeSaved, MODEL, SECRET_ID } from '../src/storage';
-import { TestEngine } from '../src/core';
+import { StructuralEngine } from '../src/core';
 import { GeminiFramer } from '../src/framing';
 import { GeminiClient, HttpRequest, HttpResponse } from '../src/gemini';
 import { AttemptJournal } from '../src/attempts';
@@ -63,8 +63,8 @@ test('AC-E: unknown existing, case variants, malformed paths and duplicate domai
   assert.doesNotThrow(() => validateClassification(result([{ path: ['é', '한글', '😀'], source: 'new', confidence: 0.5 }]), []));
 });
 
-test('v1/v2 migrate to empty Catalog without mutating Frames or legacy traces; invalid v3 is rejected', () => {
-  const frame = new TestEngine().generate(source);
+test('v1/v2 migrate to empty Catalog without mutating Frames or legacy traces; invalid v3 is rejected', async () => {
+  const frame = await new StructuralEngine().generate(source);
   const attempt = { id: 'old:1', revision: 1, sessionId: 'old', runId: 'old', purpose: 'classification', transport: 'settled', usage: { status: 'unknown', tokens: {} }, trace: { promptVersion: 'classification-v1', responseSchemaVersion: 'classification-schema-v1' } };
   for (const version of [1, 2]) {
     const old = { version, settings: { model: MODEL, secretId: SECRET_ID }, frames: { a: frame }, attempts: [attempt] };
@@ -85,7 +85,7 @@ test('Catalog saves serialize with Frames/settings/journal, deduplicate approval
   const store = new FrameStore(async data => { if (fail) throw new Error('disk'); saved = structuredClone(data); });
   const journal = new AttemptJournal(attempts => store.saveAttempts(attempts));
   const client = new GeminiClient(async () => response(existing()), undefined, 1000, journal);
-  const frame = new TestEngine().generate(source);
+  const frame = await new StructuralEngine().generate(source);
   await Promise.all([store.saveDomain(catalog[0]), store.saveFrame('a', frame), store.saveSettings(), store.saveDomain(catalog[0]), client.generate('key', 'system', {}, {})]);
   assert.deepEqual(store.getDomains(), catalog); assert.equal(store.state.attempts.length, 1); assert.deepEqual(store.state.frames.a, frame);
   const copy = store.getDomains(); copy[0].path[0] = 'mutated'; assert.deepEqual(store.getDomains(), catalog);
@@ -110,7 +110,7 @@ test('framer sends and validates the same Catalog snapshot, tracks prefix hash w
   assert.deepEqual(sent.existingDomains, catalog);
   assert.equal(preview.frame.document.domains[0].source, 'existing');
   const trace = preview.frame.evaluation;
-  assert.equal(trace.promptVersion, 'concept-extraction-v2'); assert.equal(trace.responseSchemaVersion, 'concept-extraction-schema-v2');
+  assert.equal(trace.promptVersion, 'concept-extraction-v3'); assert.equal(trace.responseSchemaVersion, 'concept-extraction-schema-v2');
   assert.equal(trace.domainCatalogHash, await sourceHash(JSON.stringify(catalog)));
   assert.equal(trace.domainCatalogCount, 1); assert.equal(trace.domainCatalogEncoding, 'catalog-json-v1');
   assert.deepEqual(trace.generationConfig, GENERATION_CONFIG);
