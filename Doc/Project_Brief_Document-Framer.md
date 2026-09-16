@@ -122,7 +122,7 @@ Document Detection / Ingestion
         ↓
 Deterministic Metadata Extraction
         ↓
-Knowledge Unit Segmentation
+Key Concept Extraction + Source Evidence Linking
         ↓
 Lightweight Classification
         ├─ Domain
@@ -251,15 +251,15 @@ LLM이 필요하지 않은 정보를 자동으로 추출한다.
 - 수정 정보
 - 기타 기계적으로 확인 가능한 metadata
 
-### Knowledge Unit Segmentation
+### Key Concept Extraction + Source Evidence Linking
 
-문서를 classification 가능한 의미 단위로 분리한다.
+재사용 가능한 핵심 개념을 추출하고 해당 개념을 뒷받침하는 실제 원문 위치를 연결한다. 모든 원문을 배분하지 않으며 0개 개념도 정상이다.
 
 정확한 기본 단위는 아직 결정하지 않았다.
 
 ### Domain Classification
 
-문서 또는 Knowledge Unit이 어떤 지식 분야와 관련되어 있는지 계층적이고 복수 선택 가능한 형태로 분류한다.
+문서가 어떤 지식 분야와 관련되어 있는지 계층적이고 복수 선택 가능한 형태로 분류한다.
 
 예:
 
@@ -378,7 +378,7 @@ Document Framer는 문서를 **구조화**하는 제품이며, 문서 내용의 
 - Deep Review
 - 선택한 문서에 대한 고급 논리 분석
 - 자동 fact verification
-- 관련 Knowledge Unit 연결
+- 관련 Knowledge Concept 연결
 - 중복 지식 탐지
 - Knowledge lifecycle 관리
 
@@ -394,7 +394,7 @@ Document Framer는 문서를 **구조화**하는 제품이며, 문서 내용의 
 
 - Label taxonomy 구조
 - Metadata schema
-- Knowledge Unit 내부 구조
+- Knowledge Concept 내부 구조
 - AI model
 - RAG 구조
 - Frame 저장 방식
@@ -495,7 +495,7 @@ Raw Document
 Preserved Content   Framing Pipeline
                       │
                       ├─ Metadata
-                      ├─ Segmentation
+                      ├─ Concept Extraction + Evidence Linking
                       ├─ Domain
                       ├─ Semantic Labels
                       └─ Confidence
@@ -516,7 +516,7 @@ Preserved Content   Framing Pipeline
     
 3. deterministic metadata와 문서 구조를 추출한다.
     
-4. 문서를 Knowledge Unit으로 분리한다.
+4. 문서를 구조 청크로 처리하여 Key Concept과 Source Evidence를 추출한다.
     
 5. 저비용 classification을 통해 Domain과 Semantic Label을 생성한다.
     
@@ -578,15 +578,15 @@ Semantic classification은 먼저 문서의 성격을 상위 수준에서 분류
 - Reflection
 - Observation
 
-하나의 Knowledge Unit에는 여러 Semantic Label이 동시에 적용될 수 있다.
+하나의 Evidence에는 여러 Semantic Label이 동시에 적용될 수 있다. Concept은 이 Evidence들의 의미상 중심이다.
 
 구체적인 Label 구성과 계층은 Classifier Spike를 통해 조정한다.
 
 ---
 
-## 7.3 Knowledge Unit Granularity
+## 7.3 Knowledge Concept Granularity
 
-기본 classification 단위는 Document이다. 해당 문서를 저비용 AI를 통해 청킹하고, 각 청크를 분석한 뒤 class를 나눈다.
+Document-level Domain/Type은 유지한다. 구조 청킹은 로컬에서 결정론적으로 수행하고 청크별 Concept 추출 후 원문 참조를 보존하여 중복 개념을 통합한다.
 
 자세한 내용은 MVP개발을 진행하며 결정한다.
 
@@ -712,7 +712,7 @@ AI가 청킹으로 나누어 둔 단위에 대해 추가적인 중요도를 매�
 
 ## 8.3 Critical Risk — Classification Granularity
 
-Knowledge Unit이 지나치게 작으면 inference 비용이 폭증하고, 지나치게 크면 semantic information이 손실된다.
+Knowledge Concept이 지나치게 작으면 inference 비용이 폭증하고, 지나치게 크면 semantic information이 손실된다.
 
 따라서 segmentation 전략은 모델 benchmark와 함께 검증할 필요가 있다.
 
@@ -762,7 +762,7 @@ Knowledge Unit이 지나치게 작으면 inference 비용이 폭증하고, 지�
 이를 위해 작은 **Classifier Spike**를 수행한다.
 
 ```text
-30–50 Sample Knowledge Units
+30–50 Sample Knowledge Concepts
            ↓
 Human Labels
            ↓
@@ -812,10 +812,10 @@ Spike의 목적은 구현이 아니라 불확실성을 제거하는 것이다.
 - 기존 taxonomy에 없는 Domain은 AI가 후보를 제안하고 사용자가 Non-blocking 방식으로 확인한다.
 - Semantic classification은 Document Type → Semantic Label의 계층 구조를 기본 방향으로 한다.
 - Document를 ingestion 및 상위 classification 단위로 사용한다.
-- Document 내부는 Knowledge Unit으로 분할하여 Semantic Classification한다.
+- Document 내부에서 Key Concept을 추출하고 Evidence별 Semantic Label을 붙인다.
 - MVP Classification Model의 baseline은 Gemini다.
 - Document Importance는 1–10 점수로 표현한다.
-- Knowledge Unit의 중요성은 Highlight on/off로 표현한다.
+- Knowledge Concept의 중요성은 Highlight on/off로 표현한다.
 
 ---
 
@@ -824,11 +824,9 @@ Spike의 목적은 구현이 아니라 불확실성을 제거하는 것이다.
 ### A-01
 
 Document를 ingestion 및 상위 classification 단위로 사용하고,
-하나의 Document를 하나 이상의 Knowledge Unit으로 분할하여
-각 Knowledge Unit을 Semantic Classification의 기본 단위로 사용하는 것이
-적절할 것으로 가정한다.
+Document를 구조 청크로 처리하고 재사용 가능한 Concept을 추출한다. 각 Concept은 여러 원문 Evidence를 가지며 Semantic Label은 Evidence의 역할을 나타낸다. 원문 전체를 배분하지 않는다.
 
-Knowledge Unit의 구체적인 segmentation 방식은 아직 확정하지 않는다.
+2R의 구조 청크/개념 추출/근거 연결을 사용하며 청크 크기와 품질 기준은 실제 평가로 조정한다.
 
 Markdown Heading, paragraph, AI 기반 semantic chunking 등의 방법을
 Classifier Spike 및 MVP 구현 과정에서 비교하고 결정한다.
@@ -849,7 +847,7 @@ Classifier Spike에서 검증한다.
 
 1. 승인 Catalog의 의미상 재사용 품질·동의어/다국어·장기 관리 정책
 2. Semantic Label Taxonomy v0.1의 실제 하위 Label
-3. Knowledge Unit segmentation 방식
+3. Knowledge Concept segmentation 방식
 4. Frame persistence 방식
 5. Clarification trigger의 구체적인 조건
 6. Classification success threshold
@@ -867,4 +865,9 @@ Taxonomy, 모델, 저장 기술 등의 세부 사항은 이후 specification 또
 
 ## 2026-09-15 Domain / Review 결정 반영
 
-PRD S-02/S-06, FR-04/FR-11/FR-15, AC-04/AC-05/AC-12와 동일한 정책을 따른다. 기본 검토는 Domain·출처·Type·Unit 경계·Label·원문 중심이며 confidence와 JSON/평가 정보는 접힌 Developer Details에 둔다. Phase 2는 후보 승인 Catalog 저장만 추가하고 활성 Frame publication·전체 사용자 수정·Reframing·자동 실행은 후속 단계로 유지한다.
+PRD S-02/S-06, FR-04/FR-11/FR-15, AC-04/AC-05/AC-12와 동일한 정책을 따른다. 기본 검토는 Domain·출처·Type·Concept·Evidence·Label·원문 중심이며 confidence와 JSON/평가 정보는 접힌 Developer Details에 둔다. Phase 2는 후보 승인 Catalog 저장만 추가하고 활성 Frame publication·전체 사용자 수정·Reframing·자동 실행은 후속 단계로 유지한다.
+
+
+## Concept-based Framing 사용자 결정
+
+Document Framer는 Raw Document에서 재사용 가치가 높은 핵심 개념을 발견하고 각 개념을 뒷받침하는 원문 위치를 연결하는 Knowledge Structuring Layer다. Concept은 AI annotation, Evidence는 실제 Raw Markdown이다. 하나의 개념에 여러 비연속 근거를 연결하며, 전환 문장·반복·목차를 모두 포함할 의무는 없다. 긴 문서는 bounded structural chunk로 처리하고 같은 개념을 로컬/제한된 모델 통합으로 모은다. Domain 승인 Catalog·Document Type·원문 보존 원칙은 유지한다. Concept Highlight를 검토 화면에 두며 전체 correction·Clarification·Safe Reframing은 후속이다.

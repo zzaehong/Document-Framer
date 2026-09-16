@@ -91,5 +91,5 @@ export class AttemptJournal {
 export function attemptSummary(a: Attempt): string {
   const count = (field: TokenField) => a.usage.tokens[field] ?? '미확인';
   const state = a.transport === 'pending' ? 'HTTP 종료 미확인' : a.transport === 'not-sent' ? '미전송' : '로컬 HTTP 종료';
-  return `${a.purpose === 'connection' ? '연결 확인' : '분류'} · 실행 ${a.runId} · 시도 ${a.attemptNumber}${a.attemptNumber > 1 ? ' (재시도)' : ''} · ${state}${a.timedOutAt !== null ? ' · 시간 초과' : ''} · ${a.outcome} · 사용량 ${a.usage.status === 'confirmed' ? '확인' : '미확인/일부 확인'} · 입력 ${count('promptTokenCount')} / 출력 ${count('candidatesTokenCount')} / 총 ${count('totalTokenCount')} tokens · 지연 ${a.durationMs === null ? '미확인' : `${a.durationMs}ms`}`;
+  return `${a.trace?.framingRunId ? `문서 실행 ${a.trace.framingRunId} · ${a.trace.stage ?? ''}${a.trace.chunkId ? ` · ${a.trace.chunkId}` : ''} · ` : ''}${a.purpose === 'connection' ? '연결 확인' : '분류'} · 실행 ${a.runId} · 시도 ${a.attemptNumber}${a.attemptNumber > 1 ? ' (재시도)' : ''} · ${state}${a.timedOutAt !== null ? ' · 시간 초과' : ''} · ${a.outcome} · 사용량 ${a.usage.status === 'confirmed' ? '확인' : '미확인/일부 확인'} · 입력 ${count('promptTokenCount')} / 출력 ${count('candidatesTokenCount')} / 총 ${count('totalTokenCount')} tokens · 지연 ${a.durationMs === null ? '미확인' : `${a.durationMs}ms`}`;
 }

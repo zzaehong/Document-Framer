@@ -15,14 +15,14 @@ import { sourceHash, GENERATION_CONFIG } from '../src/evaluation';
 const catalog = [{ path: ['Economics'] }];
 const source = { path: 'economics.md', basename: 'economics', text: '행동경제학에서는 손실 회피가 의사 결정에 영향을 준다.', ctime: 0, mtime: 0 };
 const blocks = extractBlocks(source.text);
-const result = (domains: Classification['domains']): Classification => ({ domains, type: { id: 'informational', confidence: 0.8 }, units: [{ blockIds: ['b1'], labels: [{ id: 'claim', confidence: 0.7 }, { id: 'observation', confidence: 0.4 }] }] });
+const result = (domains: Classification['domains']): Classification => ({ domains, type: { id: 'informational', confidence: 0.8 } });
 const existing = () => result([{ path: ['Economics'], source: 'existing', confidence: 0.9 }]);
 const response = (value: unknown): HttpResponse => ({ status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(value) }] } }] }) });
 
 test('AC-A/B: reuse known paths and allow new reusable multi-domain paths with three levels', () => {
-  assert.deepEqual(validateClassification(existing(), blocks, catalog), existing());
+  assert.deepEqual(validateClassification(existing(), catalog), existing());
   const candidate = result([{ path: ['Science', 'Biology', 'Genetics'], source: 'new', confidence: 0.8 }, { path: ['Economics'], source: 'existing', confidence: 0.6 }]);
-  assert.deepEqual(validateClassification(candidate, blocks, catalog), candidate);
+  assert.deepEqual(validateClassification(candidate, catalog), candidate);
   assert.deepEqual(catalog, [{ path: ['Economics'] }]);
   // 지침의 예시와 재사용 우선 규칙이 전송 프롬프트에 존재하는지 확인한다. 의미 품질의 증거는 아니다.
   assert.match(SYSTEM_PROMPT, /behavioral economics document should reuse/);
@@ -37,7 +37,7 @@ test('AC-E: unknown existing, case variants, malformed paths and duplicate domai
   for (const path of bad) {
     const value: any = existing(); value.domains = [{ path, source: 'new', confidence: 0.8 }];
     const before = structuredClone(value);
-    assert.throws(() => validateClassification(value, blocks, catalog));
+    assert.throws(() => validateClassification(value, catalog));
     assert.deepEqual(value, before);
   }
   const domains: any[] = [
@@ -57,10 +57,10 @@ test('AC-E: unknown existing, case variants, malformed paths and duplicate domai
     [{ path: ['Biology'], source: 'new', confidence: 0.8 }, { path: ['biology'], source: 'new', confidence: 0.4 }],
     [{ path: ['Other'], source: 'unclassified', confidence: 0 }, { path: ['Economics'], source: 'existing', confidence: 0.8 }],
   ];
-  for (const invalid of domains) assert.throws(() => validateClassification(result(invalid), blocks, catalog));
+  for (const invalid of domains) assert.throws(() => validateClassification(result(invalid), catalog));
   const other = result([{ path: ['Other'], source: 'unclassified', confidence: 0 }]);
-  assert.deepEqual(validateClassification(other, blocks, []), other);
-  assert.doesNotThrow(() => validateClassification(result([{ path: ['é', '한글', '😀'], source: 'new', confidence: 0.5 }]), blocks, []));
+  assert.deepEqual(validateClassification(other, []), other);
+  assert.doesNotThrow(() => validateClassification(result([{ path: ['é', '한글', '😀'], source: 'new', confidence: 0.5 }]), []));
 });
 
 test('v1/v2 migrate to empty Catalog without mutating Frames or legacy traces; invalid v3 is rejected', () => {
@@ -102,7 +102,7 @@ test('framer sends and validates the same Catalog snapshot, tracks prefix hash w
   const inputs: HttpRequest[] = [];
   const journal = new AttemptJournal(async () => {});
   const mutable: Domain[] = structuredClone(catalog);
-  const framer = new GeminiFramer(new GeminiClient(async request => { inputs.push(request); return response(existing()); }, undefined, 1000, journal));
+  const framer = new GeminiFramer(new GeminiClient(async request => { inputs.push(request); return response({ ...existing(), concepts: [] }); }, undefined, 1000, journal));
   const pending = framer.generate(source, 'key', mutable);
   mutable.push({ path: ['Biology'] }); mutable[0].path[0] = 'Changed';
   const preview = await pending;
@@ -110,7 +110,7 @@ test('framer sends and validates the same Catalog snapshot, tracks prefix hash w
   assert.deepEqual(sent.existingDomains, catalog);
   assert.equal(preview.frame.document.domains[0].source, 'existing');
   const trace = preview.frame.evaluation;
-  assert.equal(trace.promptVersion, PROMPT_VERSION); assert.equal(trace.responseSchemaVersion, RESPONSE_SCHEMA_VERSION);
+  assert.equal(trace.promptVersion, 'concept-extraction-v1'); assert.equal(trace.responseSchemaVersion, 'concept-extraction-schema-v1');
   assert.equal(trace.domainCatalogHash, await sourceHash(JSON.stringify(catalog)));
   assert.equal(trace.domainCatalogCount, 1); assert.equal(trace.domainCatalogEncoding, 'catalog-json-v1');
   assert.deepEqual(trace.generationConfig, GENERATION_CONFIG);
@@ -127,7 +127,7 @@ test('Catalog additions during HTTP cannot legitimize an invented existing respo
   const mutable = structuredClone(catalog);
   const framer = new GeminiFramer(new GeminiClient(async () => {
     mutable.push({ path: ['Biology'] });
-    return response(result([{ path: ['Biology'], source: 'existing', confidence: 0.8 }]));
+    return response({ ...result([{ path: ['Biology'], source: 'existing', confidence: 0.8 }]), concepts: [] });
   }));
   await assert.rejects(framer.generate(source, 'key', mutable), /검증 실패/);
   assert.deepEqual(decodeDomains(mutable), [...catalog, { path: ['Biology'] }]);

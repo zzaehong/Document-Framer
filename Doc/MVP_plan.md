@@ -1,11 +1,12 @@
 ## MVP 개발 단계별 목표
 
-현재 구현: 1단계와 2단계의 Gemini 분류 **별도 미리보기**까지. 설정·키 관리·저장 호환·승인 Catalog·신규 후보 검토·검증 범위는 [2단계 구현 기록](MVP_phase2.md)에 정리했다. 실제 결과의 활성 Frame 갱신과 후속 단계는 제외한다.
+현재 범위: 1단계 로컬 테스트, 2단계 Domain lifecycle, 2R Concept-based Framing **별도 미리보기**. 설정·키 관리·저장 호환·승인 Catalog·신규 후보 검토·검증 범위는 [2단계 구현 기록](MVP_phase2.md)에 정리했다. 실제 결과의 활성 Frame 갱신과 후속 단계는 제외한다.
 
 | 단계                   | 사용자가 확인할 결과                                 | 작은 개발 작업                                                  | 관련 FR               |
 | -------------------- | ------------------------------------------- | --------------------------------------------------------- | ------------------- |
 | **1. 수동 처리의 기본 흐름**  | 현재 문서에서 버튼을 누르면 대기 후 테스트 결과가 저장되고 표시됨       | 플러그인 실행 → 원문 읽기 → 요청·60초 대기 → 테스트 엔진 → 저장·조회              | 01~03, 09~11, 19 일부 |
 | **2. 실제 AI Framing** | Domain 재사용·신규 후보 승인과 Type·Unit·Label을 구조화된 Review에서 확인    | 독립 Prompt → 승인 Catalog 입력 → 분류 검증 → Review → 후보 승인 저장                  | 04~08, 15           |
+| **2R. Concept-based Framing revision** | 긴 문서를 개념과 여러 원문 근거로 검토 | 구조 청크 → 선택적 추출 → 중복 통합 → Concept Review | 06~09, 13 |
 | **3. 안전한 Reframing** | 수정된 원문으로 다시 분석하며 이전 정상 결과를 보호               | 원문 버전 비교 → 중복 요청 병합 → 구버전 결과 차단 → 저장 실패 처리                | 02, 10, 18          |
 | **4. 자동 실행과 대기 제어**  | 다른 문서 수정을 시작하면 이전 문서가 조건에 맞춰 처리됨            | 편집 감지 검증 → 전환 트리거 → 문서별 대기 → 240초 상한·완료 초기화               | 19                  |
 | **5. 사용자 중요도와 수정**   | Importance·Highlight·분류 수정을 저장하고 재분석 후에도 확인 | Importance → Highlight → Correction → 사용자 정보 보존·연결 불명확 처리 | 12~14, 18           |
@@ -24,3 +25,9 @@
 Step 3~8은 앞당기지 않는다. generation configuration, 원문/블록 한도, transport·Attempt Journal·SecretStorage 계약은 유지한다.
 
 구현 결과: 위 revision을 완료했으며 `npm run build`, `npm test`(49개 통과), `git diff --check`로 검증했다. 실제 모델 의미 품질과 Obsidian 수동 검수는 README 절차를 따른다.
+
+## 2R 구현 계획 (2026-09-16)
+
+이전 Phase 2의 partition preview 및 Domain lifecycle 검증 기록은 보존한다. 이번에는 schema 4 → 결정론 청크 → Concept prompt/검증 → 여러 청크 실행 → 로컬 중복 병합 → 제한된 의미 통합 → UI/Highlight → 테스트 순으로 구현한다. 이 revision 이후 Safe Reframing으로 진행한다.
+
+2R 구현 결과: Concept Frame 4, 구조 청크와 선택적 원문 Evidence, 로컬/의미 통합, Document 분류 집계, Concept Review/메모리 Highlight를 완료했다. `npm run build` 및 `npm test` 67개가 통과했다. 2단계의 49개 검증은 이전 revision 기록이며 현재 검증 결과는 2R이다. 다음 개발 단계는 Safe Reframing이며 실제 모델 품질 검수는 README 절차로 진행한다.

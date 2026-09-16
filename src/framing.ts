@@ -1,22 +1,23 @@
 /**
- * Gemini 미리보기 조립 계층: 로컬 메타데이터 → 블록 분할 → API 호출 → 분류 검증 → Frame 조립.
- * 원문 위치와 제목은 로컬 코드가 계산하고, AI는 분야·종류·블록 묶음과 라벨을 결정한다.
+ * Concept 처리의 전체 순서와 완료 경계를 담당한다.
+ * 입력/청크 사전 검사 → 청크별 추출 → 정확한 이름 병합 → 의미 통합 → 문서 분류 → Frame 조립.
+ * 중간 응답은 이 실행의 지역 변수에만 둔다. 어느 필수 단계든 실패하면 Preview를 반환하지 않는다.
  */
 import { Source, Frame, TestEngine } from './core';
-import { Block, extractBlocks, Location, SEGMENTER_VERSION } from './blocks';
+import { Block, SEGMENTER_VERSION } from './blocks';
 import { Classification, RESPONSE_SCHEMA, RESPONSE_SCHEMA_VERSION, TAXONOMY_VERSION, validateClassification } from './classification';
 import { PROMPT_VERSION, SYSTEM_PROMPT } from './classification-prompt';
+import { EXTRACTION_PROMPT, EXTRACTION_PROMPT_VERSION, CONSOLIDATION_PROMPT, CONSOLIDATION_PROMPT_VERSION } from './concept-prompts';
 import { Domain, decodeDomains } from './domains';
 import { GeminiClient } from './gemini';
 import { MODEL } from './storage';
 import { EvaluationTrace, GENERATION_CONFIG, sourceHash } from './evaluation';
+import { structuralChunks, CHUNKER_VERSION } from './chunks';
+import { BUDGET, PIPELINE_VERSION, budgetError, checkInputBudget } from './budget';
+import { ConceptCandidate, Extraction, KnowledgeConcept, EXTRACTION_SCHEMA, CONCEPT_SCHEMA_VERSION, CONSOLIDATION_SCHEMA, CONSOLIDATION_SCHEMA_VERSION, CONSOLIDATION_VERSION, validateExtraction, mergeExactCandidates, needsSemanticConsolidation, validateConsolidation } from './concepts';
 
-// 단일 호출 비용/출력 크기를 제한하는 미리보기용 제안. 초과 시 일부만 보내지 않는다.
-export const MAX_AI_BYTES = 64 * 1024;
-export const MAX_BLOCKS = 128;
-// schemaVersion 3은 AI 미리보기 결과이며 평가 추적 정보와 모델 버전을 포함한다.
 export interface PreviewFrame {
-  schemaVersion: 3;
+  schemaVersion: 4;
   engine: 'gemini';
   model: typeof MODEL;
   taxonomyVersion: typeof TAXONOMY_VERSION;
@@ -24,49 +25,94 @@ export interface PreviewFrame {
   previewOnly: true;
   evaluation: EvaluationTrace;
   modelVersion: string | null;
-  document: Omit<Frame['document'], 'domains' | 'type' | 'confidence'> & {
-    domains: Classification['domains'];
-    type: Classification['type'];
-  };
-  knowledgeUnits: { id: string; blockIds: string[]; source: Location; labels: Classification['units'][number]['labels']; highlight: false }[];
+  processing: { chunkCount: number; completedChunks: number; calls: { trace: EvaluationTrace; modelVersion: string | null }[] };
+  document: Omit<Frame['document'], 'domains' | 'type' | 'confidence'> & Classification;
+  concepts: KnowledgeConcept[];
 }
-// 결과와 요청 당시 원문을 함께 보관해야 편집 후에도 당시의 위치를 정확히 보여줄 수 있다.
 export interface Preview { frame: PreviewFrame; blocks: Block[]; sourceText: string; domainReviews: Record<string, 'approved' | 'rejected'> }
 export class GeminiFramer {
+  // transport 잠금은 HTTP 한 개를 보호한다. 이 잠금은 호출 사이의 await까지 포함한 문서 실행을 보호한다.
+  private running = false;
   constructor(private client: GeminiClient) {}
-  async generate(source: Source, key: string, existingDomains: readonly Domain[] = [], purpose: EvaluationTrace['purpose'] = 'classification', isValid = () => true): Promise<Preview> {
-    // 로컬 입력 검사와 메타데이터 추출을 재사용하고 API 호출 전에 AI 전용 한도를 검사한다.
-    const catalog = decodeDomains(existingDomains);
-    const metadata = new TestEngine().generate(source).document;
-    if (metadata.bytes > MAX_AI_BYTES) throw new Error('미리보기 입력 한도(64 KiB)를 초과했습니다. 문서를 나누어 다시 요청하세요.');
-    const blocks = extractBlocks(source.text);
-    if (!blocks.length || blocks.length > MAX_BLOCKS) throw new Error('미리보기 블록 한도(1~128개)를 벗어났습니다. 문서를 나누어 다시 요청하세요.');
-    // 한 실행의 ID·원문 해시·처리 버전을 남겨 후속 평가에서 입력과 생성 조건을 구별한다.
-    const evaluation: EvaluationTrace = { runId: crypto.randomUUID(), purpose, documentPath: purpose === 'classification' ? source.path : null,
-      sourceHash: await sourceHash(source.text), hashEncoding: 'sha256-utf8-raw-v1', promptVersion: PROMPT_VERSION,
-      taxonomyVersion: TAXONOMY_VERSION, segmenterVersion: SEGMENTER_VERSION, responseSchemaVersion: RESPONSE_SCHEMA_VERSION,
-      domainCatalogHash: await sourceHash(JSON.stringify(catalog)), domainCatalogCount: catalog.length, domainCatalogEncoding: 'catalog-json-v1', generationConfig: GENERATION_CONFIG };
-    // 승인 Catalog와 블록 ID·텍스트를 전송한다. 원문 경로·파일 시각·로컬 위치는 보내지 않는다.
-    const response = await this.client.generate(key, SYSTEM_PROMPT,
-      { existingDomains: catalog, blocks: blocks.map(({ id, text }) => ({ id, text })) }, RESPONSE_SCHEMA, evaluation, isValid);
-    const classification = validateClassification(response.value, blocks, catalog);
-    const { domains: _domains, type: _type, confidence: _confidence, ...local } = metadata;
-    const frame: PreviewFrame = {
-      schemaVersion: 3, engine: 'gemini', model: MODEL, taxonomyVersion: TAXONOMY_VERSION,
-      generatedAt: new Date().toISOString(), previewOnly: true, evaluation, modelVersion: response.modelVersion,
-      document: { ...local, domains: classification.domains, type: classification.type },
-      knowledgeUnits: classification.units.map((unit, i) => {
-        // 검증된 연속 블록 묶음의 첫 시작점과 마지막 끝점으로 지식 단위의 원문 범위를 만든다.
-        const first = blocks.find(b => b.id === unit.blockIds[0])!;
-        const last = blocks.find(b => b.id === unit.blockIds.at(-1))!;
-        return { id: `unit-${i + 1}`, blockIds: unit.blockIds,
-          source: { startLine: first.source.startLine, endLine: last.source.endLine, startOffset: first.source.startOffset, endOffset: last.source.endOffset },
-          labels: unit.labels, highlight: false };
-      }),
-    };
-    return { frame, blocks, sourceText: source.text, domainReviews: Object.create(null) };
+  async generate(source: Source, key: string, existingDomains: readonly Domain[] = [], purpose: EvaluationTrace['purpose'] = 'classification', isValid = () => true, progress = (_message: string) => {}): Promise<Preview> {
+    if (this.running) throw new Error('Gemini 문서 처리가 진행 중입니다. 완료 후 다시 요청하세요.');
+    this.running = true;
+    try {
+      // 원문/Catalog를 실행 시작 시 고정한다. 이후 편집·승인이 이번 실행의 입력을 바꾸지 않는다.
+      source = { ...source };
+      const catalog = decodeDomains(existingDomains);
+      const metadata = new TestEngine().generate(source).document;
+      const { blocks, chunks } = structuralChunks(source.text);
+      if (!chunks.length) throw new Error('처리할 내용이 없습니다.');
+      const inputs = chunks.map(chunk => ({ existingDomains: catalog, headingContext: chunk.headingContext,
+        blocks: chunk.blocks.map(({ id, kind, text }) => ({ id, kind, text })) }));
+      // 모든 추출 입력의 예산을 먼저 확인한다. 뒤쪽 청크가 크다는 이유로 앞부분만 유료 처리하지 않는다.
+      inputs.forEach(checkInputBudget);
+      const framingRunId = crypto.randomUUID();
+      const hash = await sourceHash(source.text);
+      const catalogHash = await sourceHash(JSON.stringify(catalog));
+      const calls: PreviewFrame['processing']['calls'] = [];
+      const ensureValid = () => { if (!isValid()) throw new Error('문서 요청이 종료되었습니다.'); };
+      const call = async (stage: NonNullable<EvaluationTrace['stage']>, prompt: string, promptVersion: string, schema: unknown, schemaVersion: string, input: unknown, chunkId?: string) => {
+        ensureValid(); checkInputBudget(input);
+        if (calls.length >= BUDGET.maxLogicalRequests) budgetError();
+        const trace: EvaluationTrace = {
+          // 호출별 ID가 다르므로 각 호출의 첫 시도(:1)가 다른 청크 기록을 덮어쓰지 않는다.
+          runId: `${framingRunId}:call-${calls.length + 1}`, framingRunId, purpose, stage, ...(chunkId ? { chunkId } : {}),
+          documentPath: purpose === 'classification' ? source.path : null,
+          sourceHash: hash, hashEncoding: 'sha256-utf8-raw-v1', promptVersion, responseSchemaVersion: schemaVersion,
+          taxonomyVersion: TAXONOMY_VERSION, segmenterVersion: SEGMENTER_VERSION, chunkerVersion: CHUNKER_VERSION,
+          pipelineVersion: PIPELINE_VERSION, extractionPromptVersion: EXTRACTION_PROMPT_VERSION,
+          conceptSchemaVersion: CONCEPT_SCHEMA_VERSION, consolidationVersion: CONSOLIDATION_VERSION,
+          consolidationPromptVersion: CONSOLIDATION_PROMPT_VERSION, inputHash: await sourceHash(JSON.stringify(input)),
+          domainCatalogHash: catalogHash, domainCatalogCount: catalog.length, domainCatalogEncoding: 'catalog-json-v1',
+          generationConfig: GENERATION_CONFIG, processingBudget: BUDGET,
+        };
+        ensureValid();
+        const response = await this.client.generate(key, prompt, input, schema, trace, isValid);
+        ensureValid(); calls.push({ trace, modelVersion: response.modelVersion });
+        return response.value;
+      };
+      const extractions: Extraction[] = [];
+      let candidates: ConceptCandidate[] = [];
+      progress(`개념 추출 준비 · ${chunks.length}개 청크 · 최대 ${chunks.length + (chunks.length > 1 ? 2 : 0)}회 요청 (재시도 별도)`);
+      for (const [index, chunk] of chunks.entries()) {
+        progress(`개념 추출 ${index + 1}/${chunks.length}`);
+        const value = await call('concept-extraction', EXTRACTION_PROMPT, EXTRACTION_PROMPT_VERSION, EXTRACTION_SCHEMA, CONCEPT_SCHEMA_VERSION, inputs[index], chunk.id);
+        const extraction = validateExtraction(value, chunk.blocks, catalog, chunk.id);
+        extractions.push(extraction); candidates.push(...extraction.concepts);
+        if (candidates.length > BUDGET.maxCandidates) budgetError();
+      }
+      // 원시 후보 수 제한은 병합 전에 적용한다. 중복이 많아도 처리 비용이 무한히 증가하지 않게 한다.
+      candidates = mergeExactCandidates(candidates, blocks);
+      if (needsSemanticConsolidation(candidates)) {
+        progress('청크 간 개념 통합 중…');
+        const value = await call('concept-consolidation', CONSOLIDATION_PROMPT, CONSOLIDATION_PROMPT_VERSION, CONSOLIDATION_SCHEMA, CONSOLIDATION_SCHEMA_VERSION,
+          { candidates: candidates.map(({ candidateId, concept, chunkIds }) => ({ candidateId, concept, chunkIds })) });
+        candidates = validateConsolidation(value, candidates, blocks);
+      }
+      // 긴 문서의 Domain/Type은 모든 청크 신호로 한 번 결정한다. 원문 전체 재전송이나 첫 청크 편향을 피한다.
+      let classification: Classification = { domains: extractions[0].domains, type: extractions[0].type };
+      if (chunks.length > 1) {
+        progress('문서 Domain·Type 분류 중…');
+        const value = await call('document-classification', SYSTEM_PROMPT, PROMPT_VERSION, RESPONSE_SCHEMA, RESPONSE_SCHEMA_VERSION,
+          { existingDomains: catalog, chunks: extractions.map((item, index) => ({ chunkId: chunks[index].id, domains: item.domains, type: item.type, concepts: item.concepts.map(c => c.concept) })) });
+        classification = validateClassification(value, catalog);
+      }
+      ensureValid();
+      const { domains: _domains, type: _type, confidence: _confidence, ...local } = metadata;
+      const frame: PreviewFrame = {
+        schemaVersion: 4, engine: 'gemini', model: MODEL, taxonomyVersion: TAXONOMY_VERSION,
+        generatedAt: new Date().toISOString(), previewOnly: true, evaluation: calls[0].trace, modelVersion: calls[0].modelVersion,
+        processing: { chunkCount: chunks.length, completedChunks: extractions.length, calls },
+        document: { ...local, ...classification },
+        concepts: candidates.map((candidate, index) => ({ id: `concept-${index + 1}`, concept: candidate.concept,
+          confidence: candidate.confidence, evidence: candidate.evidence, highlight: false })),
+      };
+      return { frame, blocks, sourceText: source.text, domainReviews: Object.create(null) };
+    } finally { this.running = false; }
   }
-  // 고정 테스트 문장을 같은 생성·검증 흐름에 통과시켜 연결과 응답 형식을 함께 확인한다.
+  // 연결 확인은 한 청크의 고정 문장으로 추출 응답까지 검증하며 사용자 문서를 사용하지 않는다.
   async checkConnection(key: string, existingDomains: readonly Domain[] = []) {
     await this.generate({ path: 'connection-test', basename: 'connection-test', ctime: 0, mtime: 0, text: 'An idea: keep brief project notes.' }, key, existingDomains, 'connection');
   }

@@ -15,7 +15,19 @@ export interface EvaluationTrace {
   promptVersion: string;
   taxonomyVersion: string;
   segmenterVersion: string;
-  responseSchemaVersion: 'classification-schema-v1' | 'classification-schema-v2';
+  responseSchemaVersion: string;
+  // runId는 한 논리 API 호출, framingRunId는 문서 전체 처리 실행을 식별한다.
+  framingRunId?: string;
+  stage?: 'concept-extraction' | 'concept-consolidation' | 'document-classification';
+  chunkId?: string;
+  chunkerVersion?: string;
+  pipelineVersion?: string;
+  extractionPromptVersion?: string;
+  conceptSchemaVersion?: string;
+  consolidationVersion?: string;
+  consolidationPromptVersion?: string;
+  inputHash?: string;
+  processingBudget?: Readonly<Record<string, number>>;
   // 과거 v1 trace에는 없다. 추가 전용 Catalog의 prefix를 해시로 검증하여 재구성한다.
   domainCatalogHash?: string;
   domainCatalogCount?: number;

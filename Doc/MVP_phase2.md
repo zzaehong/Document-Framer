@@ -108,3 +108,58 @@ Change Candidates (이번 구현 제외): 사용자 Catalog 이름 변경/삭제
 - AC-F/G: 기본 화면의 Domain·출처·Type·Unit·Label·원문과 닫힌 Developer Details의 confidence/JSON/평가 정보 분리를 UI 모형으로 검증했다.
 - AC-H: 원문 위치·retry/timeout·usage journal·SecretStorage·파일 세대 무효화 회귀가 통과했다. transport/Attempt Journal/블록 추출기와 generation configuration은 유지했다.
 - PRD 0.5, Brief, MVP Plan, README를 현재 구현과 대조했다. 이 문서 앞부분은 기존 구현 이력으로 보존했다. 실제 Obsidian 화면 수동 검수와 실제 Gemini 호출은 이번 작업에서 실행하지 않았다.
+
+
+## 2R 설계 — Concept-based Framing (2026-09-16 새 사용자 결정)
+
+이 문서 앞부분의 partition/64 KiB/128블록/Frame 3 및 49개 테스트는 이전 구현 이력이다. 현재 요구사항은 PRD 0.6의 2R 계약이다.
+
+Frame 4는 document와 concepts를 가지며 각 Concept은 여러 EvidenceSpan과 highlight를 가진다. Evidence 문자열은 모델에서 받지 않고 blockIds를 원문 offset으로 변환한다. labels는 Evidence의 역할이다. data.json v3와 기존 Frame은 그대로 유지한다.
+
+파이프라인: 입력 사전 검증 → 구조 청크 전체 계획 → 청크별 concepts/Domain/Type 추출 → 정규화 이름 중복 로컬 병합 → 필요 시 이름/ID만으로 의미 통합 → 청크 신호로 문서 Domain/Type 집계 → 모두 성공한 미리보기만 반환. 한 청크는 document 분류를 추출에 함께 받아 추가 호출하지 않는다. 의미 통합은 다른 청크 사이에 비동일 이름이 남았을 때만 최대 한 번 사용한다. 모든 다른 이름이 동의어인지 로컬에서 증명할 수 없으므로 이때 한 번 비교하며, 모델은 다른 개념은 singleton으로 유지해야 한다.
+
+예산: 512 KiB 문서, 32청크, 청크당 16 KiB/64블록, 작은 섹션 병합 기준 2 KiB, 청크당 16개 Concept/문서당 128개 원시 후보, 모델 입력 JSON 96 KiB, 문서 집계 1회·통합 1회, 최대 논리 호출 34회/HTTP 68회. 이는 API 최대치가 아니라 테스트 가능한 MVP 비용 상한이다. 설정값은 budget.ts에서 관리한다. 모델 품질/토큰 적합성은 실제 평가로 조정한다.
+
+Trace는 기존 purpose와 호출별 runId를 보존하고 framingRunId/stage/chunkId로 연결한다. 원문 hash·chunker/prompt/schema/consolidation 버전·Catalog hash·각 실제 입력 hash·생성 설정을 남긴다. 원문 전체를 Attempt log에 복제하지 않는다.
+
+Highlight는 미리보기의 사용자 선택이며 메모리에서만 유지한다. 전체 Human Correction과 사용자 annotation 영구 보존·Clarification·자동 실행·Safe Reframing은 구현하지 않는다.
+
+2R 청크 계획 보완: 작은 Heading이 많아 32청크를 넘으면 인접 섹션을 16 KiB/64블록까지 다시 묶는다. 두 계획 모두 실패한 경우에만 입력 청크 예산 초과로 처리한다.
+
+### 2R 구현 결과와 검증
+
+- `src/budget.ts`: 문서·청크·후보·호출 예산 상수와 입력 크기 검사.
+- `src/chunks.ts`: Heading/블록 우선 청크, 과대 블록의 줄/Unicode 경계 분할, 작은 섹션 재묶기, 전체 원문 위치 유지.
+- `src/concept-prompts.ts`: 개념 추출 및 이름/후보 ID 기반 통합 프롬프트. `classification-prompt.ts`는 Document Domain/Type 집계 역할이다.
+- `src/concepts.ts`: Concept/Evidence schema와 검증, 정확한 이름의 로컬 병합, 의미 통합 후보 보존 검사. 근거 중복은 블록 단위로 정리하고 인접·동일 Label 블록을 다시 묶는다. 같은 Label의 confidence는 최솟값을 유지하며 구체적 역할이 있으면 unclassified를 제외한다.
+- `src/classification.ts`: Domain/Type 계약으로 한정했다. 기존 Domain 경로/출처 검증 규칙은 유지한다.
+- `src/framing.ts`: 순차 파이프라인, 문서 실행 잠금, 호출 전 예산·유효성 확인, 진행 상태, 전체 완료 후 Frame 4 반환. 실패한 중간 후보는 정상 미리보기로 반환하지 않는다.
+- `src/evaluation.ts`/`src/attempts.ts`: 호출별 trace 연결과 단계/청크의 Journal 표시. 기존 저장 이력 로드 및 사용량 기록 방식은 유지한다.
+- `src/main.ts`/`src/settings.ts`: Concept/Evidence Review, 메모리 Highlight, 청크 진행과 요청 예산 안내. Domain 승인 UI와 Developer Details 분리는 유지한다.
+
+검증(2026-09-16):
+
+- `npm run build`: 성공, TypeScript 검사와 `main.js` 생성.
+- `npm test`: **67 passed, 0 failed**. tsx IPC 소켓 제약 때문에 승인된 sandbox 밖에서 실행했다.
+- `git diff --check`: 통과.
+- `git diff --exit-code -- src/gemini.ts src/storage.ts src/domains.ts src/blocks.ts src/core.ts`: 변경 없음 확인. 생성 설정은 EvaluationTrace의 타입 확장과 별개로 그대로 유지했다.
+- 기존 49개 테스트 중 partition 전체 배분 검증을 새 선택적 Evidence 검증과 Domain 테스트로 재구성하여 기존 파일은 48개가 되었고, `tests/concepts.test.ts` 16개 및 플러그인 UI/실패 보존 3개를 추가하여 총 67개다.
+- 요청문 Test A/B/C/F: 미선택 원문·비연속 Evidence·0개 Concept·가짜 ID/요약/임의 offset 거부를 검증했다.
+- Test D/E: 서로 다른 청크의 의미 병합과 정규화 이름의 무호출 병합, 후보 누락/중복/위조 거부를 검증했다.
+- Test G/H/I: 64 KiB 및 128블록 초과, 실제 repository PRD와 문서형 입력, 예산 초과, 청크/통합/문서분류 실패, 최대 34개 논리 호출/68 HTTP 시도를 검증했다.
+- Test J: Domain 승인/재시작/재사용, retry/timeout/늦은 사용량, SecretStorage, 원문/기존 Frame 보존 회귀가 통과했다. 새 trace도 data.json v3에서 복원된다.
+
+### 남은 Open Decisions
+
+- 실제 Gemini에서 개념의 재사용 가치·선택적 근거 적합성·의미 통합의 과병합/미병합을 평가할 기준과 corpus.
+- 청크 크기/Concept 수/출력 토큰 예산의 실사용 품질·비용 조정. 현재 값은 API 한도를 검증한 최대값이 아니라 MVP의 내부 상한이다.
+- 긴 문서의 최종 Domain/Type은 원문을 다시 보내지 않고 청크 신호를 집계한다. 그 과정의 분류 편향과 개념 이름만 사용한 동의어 판정은 실제 평가가 필요하다.
+- Safe Reframing에서 Concept/Evidence ID 대응, 사용자 이름/연결/Label/Highlight 영구 보존 정책. 현재 Highlight는 메모리 전용이다.
+
+### Change Candidates — 이번 구현 제외
+
+- 결정론적 문장 단위 Evidence 분할 및 대형 코드 블록 맥락 개선.
+- 실패 청크의 재시작 후 재개/중간 캐시 및 실행별 사용량 합계 UI.
+- Concept 통합 판단의 사용자 검토·되돌리기. 의미 유사도 DB·embedding·RAG·Concept graph는 도입하지 않았다.
+
+실제 외부 Gemini 호출 및 Obsidian GUI 수동 검수는 이번 자동 검증에 포함하지 않았다. 사용 절차와 평가 항목은 README의 2R 항목에 정리했다. PRD/Brief/Plan의 현재 제품 정의를 Concept/Evidence로 정리했으며, 이 문서 앞부분의 이전 구현 기록은 역사적으로 보존했다.

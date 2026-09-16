@@ -1,5 +1,5 @@
 > **Status:** Draft / Specification  
-> **Version:** 0.5
+> **Version:** 0.6
 > **Project:** Document Framer  
 > **Timebox:** 10 days  
 > **Workflow Stage:** Step 2 — Specify Observable Behavior
@@ -127,9 +127,9 @@ MVP에서는 다음 기능을 제공하지 않는다.
     
 6. Document-level Frame을 생성한다.
     
-7. 문서를 Knowledge Unit으로 분할한다.
+7. 구조 청크별 Key Concept을 추출하고 원문 Evidence를 연결한다.
     
-8. 각 Knowledge Unit에 필요한 semantic annotation을 생성한다.
+8. 각 Evidence에 역할 라벨을 붙이고 중복 Concept을 통합한다.
     
 9. Frame을 저장한다.
     
@@ -163,34 +163,9 @@ Engineering
 
 ---
 
-## S-03 — Knowledge Unit Classification
+## S-03 — Knowledge Concept Classification
 
-시스템은 Document를 하나 이상의 Knowledge Unit으로 분할할 수 있다.
-
-각 Knowledge Unit은 해당 내용의 역할에 맞는 Semantic Label을 하나 이상 가질 수 있다.
-
-예:
-
-```text
-Knowledge Unit A
-→ Claim
-
-Knowledge Unit B
-→ Evidence
-
-Knowledge Unit C
-→ Conclusion
-```
-
-또는:
-
-```text
-Knowledge Unit D
-→ Observation
-→ Decision
-```
-
-Knowledge Unit은 반드시 mutually exclusive한 하나의 label만 가져야 하는 것은 아니다.
+문서에서 재사용 가치가 있는 Key Concept을 추출하고 각 개념을 뒷받침하는 실제 원문 Evidence를 연결한다. Concept은 AI annotation이며 설명 요약문을 지식 원문 대신 생성하지 않는다. 하나의 Concept은 서로 떨어진 여러 Evidence를 가질 수 있다. 반복 설명·전환·목차 등은 생략할 수 있고, 문서 전체 또는 청크에서 0개 Concept도 정상이다. Semantic Label은 각 Evidence의 역할을 설명한다.
 
 ---
 
@@ -206,9 +181,9 @@ Document Importance는:
 
 범위의 점수로 표현한다.
 
-사용자는 개별 Knowledge Unit을 별도로 Highlight할 수 있다.
+사용자는 개별 Knowledge Concept을 별도로 Highlight할 수 있다.
 
-Knowledge Unit Highlight는:
+Knowledge Concept Highlight는:
 
 ```text
 ON / OFF
@@ -260,7 +235,7 @@ Document
 
 `기타`를 선택하면 자유 형식으로 답변할 수 있다.
 
-사용자의 답변은 관련 Document 또는 Knowledge Unit의 Frame에 반영된다.
+사용자의 답변은 관련 Document 또는 Knowledge Concept의 Frame에 반영된다.
 
 Clarification은 다음 두 종류를 지원한다.
 
@@ -336,19 +311,15 @@ MVP taxonomy는 최소한 다음 성격을 구분하는 것을 목표로 한다.
 
 ---
 
-## FR-06 — Knowledge Unit Segmentation
+## FR-06 — Key Concept Extraction
 
-시스템은 하나의 Document를 Semantic Classification이 가능한 하나 이상의 Knowledge Unit으로 분할할 수 있어야 한다.
-
-구체적인 segmentation algorithm은 제품 요구사항으로 고정하지 않는다.
+기존 FR-06을 Key Concept Extraction으로 변경한다. Heading → 문단/블록 → 크기 경계 순으로 원문을 결정론적 처리 청크로 나누고, 각 청크에서 재사용 가능한 개념과 근거 블록만 선택한다. Heading은 처리 경계/맥락이며 자동 Concept이 아니다. 모든 블록을 배분할 의무는 없다. 정규화 이름 중복은 로컬 병합하고 청크 간 의미 중복은 제한된 통합 단계로 해결한다. 필수 청크 실패는 전체 완료로 공개하지 않는다.
 
 ---
 
 ## FR-07 — Semantic Classification
 
-시스템은 Knowledge Unit에 하나 이상의 Semantic Label을 할당할 수 있어야 한다.
-
-Semantic Label은 Document Type에 따라 다른 하위 taxonomy를 사용할 수 있다.
+Semantic Label은 Concept 자체가 아니라 Evidence가 문서 안에서 수행하는 역할을 나타낸다. Evidence마다 기존 claim/evidence/conclusion/idea/observation/decision/context/unclassified 중 하나 이상의 라벨과 confidence를 유지한다. unclassified는 단독 사용한다.
 
 ---
 
@@ -362,33 +333,7 @@ Confidence의 표현 방식과 threshold는 추후 결정한다.
 
 ## FR-09 — Frame Generation
 
-시스템은 Document와 Knowledge Unit에 대한 분석 결과를 하나의 Frame으로 표현할 수 있어야 한다.
-
-Frame은 최소한 다음 개념을 표현할 수 있어야 한다.
-
-### Document Level
-
-- Metadata
-    
-- Domain
-    
-- Document Type
-    
-- Importance
-    
-- Classification Confidence
-    
-
-### Knowledge Unit Level
-
-- Source location 또는 원문과 연결할 수 있는 정보
-    
-- Semantic Labels
-    
-- Classification Confidence
-    
-- Highlight
-    
+Document에는 기존 metadata·Domain·Type·Importance를 유지한다. concepts 배열에는 id·concept 이름·confidence·highlight·evidence 배열을 둔다. Evidence는 blockIds와 로컬 계산 startLine/endLine/startOffset/endOffset 및 labels를 가진다. AI가 작성한 요약문이나 임의 offset은 허용하지 않는다. Concept 0개도 전체 필수 단계가 성공했다면 정상이다. 이후 사용자 Concept 이름/근거 연결/Label 수정과 Clarification은 Document·Concept·Evidence를 대상으로 구분한다.
 
 ---
 
@@ -404,7 +349,7 @@ Frame은 최소한 다음 개념을 표현할 수 있어야 한다.
 
 사용자는 처리된 Document의 Frame을 확인할 수 있어야 한다.
 
-Gemini 기본 검토 화면은 Domain 경로·기존/신규 여부·Document Type·Knowledge Unit 경계·Semantic Label·해당 원문을 구조화하여 표시한다. 신규 후보에는 승인·거절을 제공한다. Raw JSON, confidence, run ID, 모델과 평가 버전 정보는 기본으로 접힌 Developer Details에서 확인한다. confidence는 모델의 자기 평가이며 정확도 확률로 안내하지 않는다.
+Gemini 기본 검토 화면은 Domain 경로·기존/신규 여부·Document Type·Concept 이름·Evidence 행 범위·Semantic Label·해당 원문을 구조화하여 표시한다. 신규 후보에는 승인·거절을 제공한다. Raw JSON, confidence, run ID, 모델과 평가 버전 정보는 기본으로 접힌 Developer Details에서 확인한다. confidence는 모델의 자기 평가이며 정확도 확률로 안내하지 않는다.
 
 ---
 
@@ -414,9 +359,9 @@ Gemini 기본 검토 화면은 Domain 경로·기존/신규 여부·Document Typ
 
 ---
 
-## FR-13 — Knowledge Unit Highlight
+## FR-13 — Knowledge Concept Highlight
 
-사용자는 개별 Knowledge Unit의 Highlight 상태를 ON/OFF할 수 있어야 한다.
+사용자는 Concept의 중요성을 Highlight ON/OFF로 표시할 수 있어야 한다. 이번 2R 미리보기에서는 명시적 클릭으로 메모리의 highlight만 변경하며 재시작 시 사라짐을 표시한다. 영구 Human annotation 저장·Reframing 보존은 후속 단계다. Document Importance 요구는 유지한다.
 
 ---
 
@@ -474,7 +419,7 @@ Clarification은 최소한 다음 정보를 가져야 한다.
 
 `기타`를 선택하면 자유 형식의 답변을 입력할 수 있다.
 
-사용자가 응답한 결과는 해당 Document 또는 Knowledge Unit의 Frame에 반영되어야 한다.
+사용자가 응답한 결과는 해당 Document 또는 Knowledge Concept의 Frame에 반영되어야 한다.
 
 MVP는 Google Docs의 전체 댓글 시스템을 구현하는 것을 요구하지 않는다. 특정 원문 위치에 질문을 연결하고 사용자가 이에 응답할 수 있는 interaction model만을 요구한다.
 
@@ -507,7 +452,7 @@ AI-generated annotation은 새 분석 결과로 갱신할 수 있다.
 반면 사용자가 직접 지정한 다음 정보는 AI-generated annotation과 구분되어야 한다.
 
 - Document Importance
-- Knowledge Unit Highlight
+- Knowledge Concept Highlight
 - Human Correction
 - Clarification Response
 
@@ -531,9 +476,9 @@ Reframing이 수행되더라도 이러한 Human-authored 정보가 의도치 않
 
 ### 반복 수정에 따른 대기 증가 — 사용자 확정
 
-문서별 대기는 **60 → 120 → 180 → 240초**로 증가하며 **240초를 초과하지 않는다**. Framing과 Knowledge Unit 분할을 포함한 처리가 정상 완료되면 해당 문서의 대기를 **60초로 초기화**한다. 다른 문서의 대기 시간에는 영향을 주지 않는다. 늘어난 대기는 버튼 경로와 다른 문서 수정 경로 모두에 적용한다.
+문서별 대기는 **60 → 120 → 180 → 240초**로 증가하며 **240초를 초과하지 않는다**. Framing과 Knowledge Concept 추출을 포함한 처리가 정상 완료되면 해당 문서의 대기를 **60초로 초기화**한다. 다른 문서의 대기 시간에는 영향을 주지 않는다. 늘어난 대기는 버튼 경로와 다른 문서 수정 경로 모두에 적용한다.
 
-완료의 구체화: 현재 원문과 일치하는 Frame에 Unit 분할·필수 annotation이 포함되고 검증 및 저장까지 성공해야 정상 완료로 인정한다. 구버전 원문의 늦은 응답, 부분 완료, 저장 실패 및 Blocking Clarification 대기는 초기화하지 않는다. Non-blocking 질문은 Frame 완료를 막지 않는다. 따라서 정상 완료 이후 다시 수정하면 60초부터 시작하며, 최신 원문에 대한 완료 전에 재수정이 반복될 때만 증가가 누적된다.
+완료의 구체화: 현재 원문과 일치하는 Frame에 Concept 추출·필수 annotation이 포함되고 검증 및 저장까지 성공해야 정상 완료로 인정한다. 구버전 원문의 늦은 응답, 부분 완료, 저장 실패 및 Blocking Clarification 대기는 초기화하지 않는다. Non-blocking 질문은 Frame 완료를 막지 않는다. 따라서 정상 완료 이후 다시 수정하면 60초부터 시작하며, 최신 원문에 대한 완료 전에 재수정이 반복될 때만 증가가 누적된다.
 
 ### 경계 동작 — 검토용 해석
 
@@ -593,19 +538,15 @@ Reframing이 수행되더라도 이러한 Human-authored 정보가 의도치 않
 
 ---
 
-## AC-06 — Knowledge Units
+## AC-06 — Knowledge Concepts
 
-**Given** 하나의 문서 안에 서로 다른 의미적 역할을 가진 내용이 존재할 때  
-**When** Framing을 수행하면  
-**Then** 시스템은 해당 문서를 하나 이상의 Knowledge Unit으로 표현할 수 있다.
+10개 블록 중 4개만 근거로 선택해도 검증에 성공한다. 하나의 Concept이 b2/b7/b10의 서로 떨어진 Evidence를 가질 수 있다. 의미 있는 개념이 없는 청크는 concepts: []를 허용한다. 원문은 그대로 보존된다.
 
 ---
 
 ## AC-07 — Multi-label Semantic Annotation
 
-**Given** 하나의 Knowledge Unit이 둘 이상의 의미적 역할을 가질 때  
-**When** Semantic Classification을 수행하면  
-**Then** 둘 이상의 Semantic Label을 동시에 표현할 수 있다.
+Evidence가 claim과 context 등 여러 역할을 가지면 여러 Semantic Label을 표시할 수 있다. Concept의 이름과 Evidence의 역할을 별도로 검토할 수 있어야 한다.
 
 ---
 
@@ -619,9 +560,7 @@ Reframing이 수행되더라도 이러한 Human-authored 정보가 의도치 않
 
 ## AC-09 — Highlight
 
-**Given** 하나 이상의 Knowledge Unit이 존재할 때  
-**When** 사용자가 특정 Unit을 Highlight하면  
-**Then** 해당 Unit의 Highlight 상태가 저장되고 다시 확인할 수 있다.
+사용자가 Concept의 중요 표시를 누르면 해당 Concept의 highlight가 바뀐다. 현재 미리보기에서 유지되며 영구 저장되지 않는다는 점을 화면에서 알린다. 향후 Human-authored persistence는 원문 재분석으로 덮어쓰지 않는 원칙을 따른다.
 
 ---
 
@@ -686,7 +625,7 @@ Reframing이 수행되더라도 이러한 Human-authored 정보가 의도치 않
 
 **Given** 빈 문서, 공백만 있는 문서 또는 처리 한도를 초과한 문서가 있을 때  
 **When** 처리를 요청하면  
-**Then** 각각 처리할 내용 없음 또는 한도 초과 사유를 확인할 수 있고, 의미 없는 Unit이나 일부만 분석한 완료 Frame을 생성하지 않는다. 원문은 변경되지 않는다.
+**Then** 각각 처리할 내용 없음 또는 한도 초과 사유를 확인할 수 있고, 의미 없는 Concept이나 일부만 분석한 완료 Frame을 생성하지 않는다. 원문은 변경되지 않는다.
 
 ---
 
@@ -700,7 +639,7 @@ Reframing이 수행되더라도 이러한 Human-authored 정보가 의도치 않
 
 ## AC-18 — Validated Frame Publication
 
-**Given** 필수 필드 누락, 유효하지 않은 label 또는 원문 범위 밖의 Unit 위치가 포함된 분석 결과가 있을 때  
+**Given** 필수 필드 누락, 유효하지 않은 label 또는 원문 범위 밖의 Evidence 위치가 포함된 분석 결과가 있을 때
 **When** Frame 저장을 시도하면  
 **Then** 해당 결과를 정상 완료 Frame으로 공개하지 않고 기존 정상 Frame과 사용자 정보를 보존한다.
 
@@ -724,9 +663,9 @@ Reframing이 수행되더라도 이러한 Human-authored 정보가 의도치 않
 
 ## AC-21 — Unresolved Human Annotation Mapping
 
-**Given** Highlight 또는 Human Correction이 적용된 Unit이 있고 원문 수정으로 해당 Unit이 분할·병합·삭제되었을 때  
-**When** Reframing 후 기존 Unit과 새 Unit의 대응을 확정할 수 없으면  
-**Then** 사용자 정보와 이전 대상 정보를 보존하여 연결 확인 필요로 표시하고, 임의의 새 Unit에 적용하지 않는다. Document Importance는 동일 문서에서 유지된다.
+**Given** Highlight 또는 Human Correction이 적용된 Concept/Evidence가 있고 원문 수정으로 개념 또는 근거 연결이 달라졌을 때
+**When** Reframing 후 기존 Concept/Evidence와 새 대상의 대응을 확정할 수 없으면
+**Then** 사용자 정보와 이전 대상 정보를 보존하여 연결 확인 필요로 표시하고, 임의의 새 Concept/Evidence에 적용하지 않는다. Document Importance는 동일 문서에서 유지된다.
 
 ---
 
@@ -809,7 +748,7 @@ Reframing이 수행되더라도 이러한 Human-authored 정보가 의도치 않
 **Then** 다음 대기는 120초다. 각 후속 실행에서도 같은 상황이 반복되면 180초, 240초로 증가하고 이후에는 240초를 유지한다. 대기 중 여러 번 입력해도 단계는 추가 증가하지 않으며 다른 문서의 대기에는 영향을 주지 않는다.
 
 **Given** A의 대기가 240초일 때  
-**When** 최신 원문에 대한 Unit 분할·필수 annotation·Frame 검증 및 저장이 정상 완료되면  
+**When** 최신 원문에 대한 Concept 추출·필수 annotation·Frame 검증 및 저장이 정상 완료되면
 **Then** A의 대기는 60초로 초기화된다. 이후 새 수정과 유효한 실행 신호가 있으면 마지막 변경 후 60초부터 실행 가능하다. 구버전 결과 도착, 저장 실패, 부분 완료 또는 Blocking 질문 대기만으로는 초기화하지 않는다.
 
 ---
@@ -889,9 +828,9 @@ MVP의 AI classification은 사용자 결정(2026-09-15)에 따라 Gemini를 bas
 
 Document Type과 각 Type의 하위 Semantic Label을 확정해야 한다.
 
-### OD-03 — Segmentation
+### OD-03 — Structural Chunking and Concept Extraction
 
-Knowledge Unit을 어떤 방식으로 생성할지 결정해야 한다.
+Concept 추출과 원문 블록 Evidence 연결로 결정했다. 처리 청크 크기·추출 품질과 통합의 과병합/미병합 기준은 실문서 평가로 조정한다.
 
 ### OD-04 — Classification Model
 
@@ -917,7 +856,7 @@ Non-blocking / Blocking clarification을 생성하는 구체적인 조건을 결
 
 ### OD-09 — Source Identity and Annotation Mapping
 
-문서 이동·이름 변경 시 동일성 판정 방식, 원문 버전 식별, Unit 및 Clarification anchor의 대응 기준을 Step 3에서 결정한다. 자동 재연결을 확정할 수 없을 때는 사용자 정보를 보존하고 연결 확인 필요로 표시한다. 복잡한 자동 병합과 완전한 편집 이력 관리는 MVP에 요구하지 않는다.
+문서 이동·이름 변경 시 동일성 판정 방식, 원문 버전 식별, Concept/Evidence 및 Clarification anchor의 대응 기준을 Step 3에서 결정한다. 자동 재연결을 확정할 수 없을 때는 사용자 정보를 보존하고 연결 확인 필요로 표시한다. 복잡한 자동 병합과 완전한 편집 이력 관리는 MVP에 요구하지 않는다.
 
 ### OD-10 — Unclassifiable Content and Clarification Bounds
 
@@ -927,7 +866,7 @@ Domain의 `기타`와 별개로, Document Type·Semantic Label을 결정할 수 
 
 ### OD-11 — Adaptive Waiting Reset and Edit Detection
 
-사용자가 확정한 규칙은 두 가지 AND 트리거, 문서별 60초 선형 증가, 상한 240초, Framing 및 Unit 분할 정상 완료 시 60초 초기화다. 다음 세부 사항은 아직 확정하지 않았다.
+사용자가 확정한 규칙은 두 가지 AND 트리거, 문서별 60초 선형 증가, 상한 240초, Framing 및 Concept 추출 정상 완료 시 60초 초기화다. 다음 세부 사항은 아직 확정하지 않았다.
 - 재시작 시 대기 단계와 미처리 요청을 어떻게 유지할지. 재시작만으로 빈도 제한이 우회되지 않도록 설계한다.
 - Obsidian 사용자 편집을 외부 동기화·일괄 파일 변경과 구분하는 관찰 방식. 파일 변경 이벤트만으로 사용자의 문서 전환을 확정할 수 있는지는 Step 3에서 검증한다. 판별이 불가능할 때 임의로 다른 문서 수정 신호를 만들지 않으며 버튼 경로를 유지한다.
 
@@ -969,9 +908,9 @@ FR-19의 경계 동작은 검토용 해석이며, 이 항목의 구체적인 값
 
 | ID | 상황 | 기대 동작 | 관련 요구사항 / 검증 |
 | --- | --- | --- | --- |
-| EC-01 | 빈 파일 또는 공백만 존재 | 분석할 내용 없음으로 표시하고 LLM 호출과 의미 없는 Unit 생성을 하지 않는다. 기존 Frame이 있다면 현재 빈 원문의 결과인 것처럼 표시하지 않는다. | FR-01, FR-06 / AC-16 |
+| EC-01 | 빈 파일 또는 공백만 존재 | 분석할 내용 없음으로 표시하고 LLM 호출과 의미 없는 Concept 생성을 하지 않는다. 기존 Frame이 있다면 현재 빈 원문의 결과인 것처럼 표시하지 않는다. | FR-01, FR-06 / AC-16 |
 | EC-02 | 짧은 메모, 혼합 언어, 코드·표·링크만 있는 문서, 비정형 Markdown | 형식이 일정하지 않다는 이유만으로 거절하지 않는다. 읽을 수 있는 원문 범위 안에서 처리하고, 의미 분류가 불가능하면 OD-10의 미분류 동작을 적용한다. 없는 내용을 추론해 채우지 않는다. | FR-01, FR-05~08 / AC-02, AC-18 |
-| EC-03 | 파일 크기 또는 모델 입력 한도 초과 | 한도 초과와 사용자 조치를 알리고 해당 처리를 중단한다. 뒤쪽 내용을 말없이 버리거나 일부 분석을 전체 완료로 표시하지 않는다. 대용량 자동 분할 기능은 필수가 아니다. | FR-01, FR-09 / AC-16; OD-08 |
+| EC-03 | 파일 크기 또는 모델 입력 한도 초과 | 한도 초과와 사용자 조치를 알리고 해당 처리를 중단한다. 뒤쪽 내용을 말없이 버리거나 일부 분석을 전체 완료로 표시하지 않는다. 2R에서는 구조 청크로 처리하되 명시된 문서/청크/요청 예산을 넘으면 실패한다. | FR-01, FR-09 / AC-16; OD-08 |
 | EC-04 | 읽기 권한 없음, 잠긴 파일, 읽을 수 없는 인코딩 | 해당 문서의 실패 사유를 표시하고 다른 문서 처리를 계속한다. 접근 복구 후 재시도할 수 있다. 원문 인코딩을 자동 변환해 덮어쓰지 않는다. | FR-01~02 / AC-17 |
 | EC-05 | 중복 저장 이벤트 또는 중복 처리 요청 | 동일 문서·원문 버전의 요청으로 활성 Frame이나 동일 질문이 중복 생성되지 않는다. 내용이 같은 별도 파일의 사용자 정보는 독립적으로 취급한다. | FR-10, FR-16, FR-18 / AC-20 |
 | EC-06 | 분석 도중 원문을 연속 수정 | 분석 대상 버전과 현재 원문을 구분한다. 뒤늦게 끝난 구버전 결과가 신버전 결과를 덮어쓰지 않으며 최신 원문의 처리 필요 여부를 표시한다. | FR-09, FR-18 / AC-19 |
@@ -985,14 +924,14 @@ FR-19의 경계 동작은 검토용 해석이며, 이 항목의 구체적인 값
 | EF-01 | 모델 timeout, 일시적 네트워크 장애, 요청 제한 | 유한한 재시도 정책을 적용한다. 한도 소진 후 실패 또는 재시도 대기로 표시한다. 공통 서비스 장애 시 관련 분석 작업은 대기할 수 있으나 기존 Frame 조회와 사용자 정보 편집은 가능한 범위에서 유지한다. | FR-10~14, QR-01 / AC-17; OD-08 |
 | EF-02 | 인증 오류, 사용량·결제 한도 등 설정 변경이 필요한 오류 | 반복 자동 요청을 멈추고 필요한 설정 조치를 안내한다. 해결 후 재시도할 수 있다. 고비용 모델로 자동 전환하지 않는다. | QR-01, FR-18 / AC-17; OD-08 |
 | EF-03 | 응답 형식 오류, 필수 필드 누락, 허용되지 않은 label·confidence, 잘못된 source location | 검증 실패로 취급한다. 잘못된 응답은 완료 Frame으로 저장하지 않는다. 현재 Phase 2에서는 검증 실패의 자동 재시도나 보정 호출을 하지 않는다. 모델 응답의 임의 label을 taxonomy에 추가하지 않는다. | FR-04~10, FR-15 / AC-18 |
-| EF-04 | 일부 Knowledge Unit 분석만 성공 | 전체 Frame 완료로 표시하지 않는다. 기존 정상 Frame을 보존하며 재시도할 수 있게 한다. 중간 결과 공개·Unit 단위 재시작은 MVP 필수가 아니다. | FR-06~10 / AC-18, AC-24 |
+| EF-04 | 일부 Knowledge Concept 분석만 성공 | 전체 Frame 완료로 표시하지 않는다. 기존 정상 Frame을 보존하며 재시도할 수 있게 한다. 중간 결과 공개·청크 단위 재시작은 MVP 필수가 아니다. | FR-06~10 / AC-18, AC-24 |
 | EC-09 | 여러 의미가 섞이거나 분류 confidence가 낮음 | 허용 taxonomy 내 multi-label을 사용할 수 있으며 불확실성을 유지한다. 적합한 승인 Domain이 없으면 신규 후보를 제안하고, 문서 의미를 판단할 수 없을 때만 `기타`를 사용한다. 낮은 confidence만으로 모든 문서를 Blocking하지 않고 OD-07의 조건을 적용한다. | FR-04~08, FR-15~17 / AC-07, AC-12; OD-10 |
 
 ## 12.4 Human Information and Clarification
 
 | ID | 상황 | 기대 동작 | 관련 요구사항 / 검증 |
 | --- | --- | --- | --- |
-| EC-10 | Reframing으로 Unit 분할·병합·삭제 | 기존 Highlight·Correction·Response와 이전 대상을 보존한다. 대응이 확정된 경우만 새 대상에 적용하고 나머지는 연결 확인 필요로 표시한다. 완전한 자동 재매핑 UI는 요구하지 않는다. | FR-13~14, FR-18 / AC-21 |
+| EC-10 | Reframing으로 Concept 추출·병합·삭제 | 기존 Highlight·Correction·Response와 이전 대상을 보존한다. 대응이 확정된 경우만 새 대상에 적용하고 나머지는 연결 확인 필요로 표시한다. 완전한 자동 재매핑 UI는 요구하지 않는다. | FR-13~14, FR-18 / AC-21 |
 | EC-11 | 질문 이후 줄 삽입·삭제 또는 대상 문장 변경 | 줄 번호만 같다는 이유로 다른 문장에 연결하지 않는다. 원문 위치의 대상 동일성을 확인하거나 이전 질문 대상과 연결 확인 필요 상태를 보여준다. 불확실한 답변을 현재 classification에 자동 적용하지 않는다. | FR-16, FR-18 / AC-22 |
 | EC-12 | 질문 장기 미응답 또는 같은 질문의 반복 생성 | Non-blocking 질문은 나중에 답할 수 있게 유지하고 Blocking 질문은 해당 문서만 보류한다. 무응답을 동의로 해석하지 않으며 무응답만으로 동일 질문을 계속 생성하지 않는다. | FR-16~17 / AC-11, AC-20, AC-23 |
 | EC-13 | Reframing 중 사용자 수정 또는 답변 | 저장된 최신 사용자 변경을 새 AI 결과보다 우선한다. 여러 편집 요청이 충돌하면 조용히 덮어쓰지 않고 다시 확인하도록 알린다. 질문 중복 제출은 동일 응답의 중복 반영을 만들지 않는다. | FR-14, FR-16, FR-18 / AC-25 |
@@ -1031,3 +970,19 @@ Step 3에서는 OD-08~11 및 기존 Open Decisions를 해당 기능 구현 전�
 - 승인 저장 실패는 성공으로 표시하지 않고 다시 승인할 수 있다. 동시 승인·Frame·설정·호출 기록 저장은 서로의 데이터를 보존한다.
 - 미리보기 교체·원문 삭제/이동·플러그인 종료 후 남은 창에서 후보 승인을 새로 시작하지 않는다.
 - 미승인·거절 상태는 이번 preview-only slice에서 메모리에만 유지한다. 재시작 후 후보는 사라지고 승인 Catalog만 보존된다. 이는 전체 Clarification persistence의 구현을 뜻하지 않는다.
+
+
+## 2R Concept revision — 처리 예산과 실패 정책
+
+새 사용자 결정(prompt.md)이 기존 partition 규칙을 대체한다. 모든 원문 배분은 폐기하며 Raw Markdown에 남은 부분을 Frame 누락 오류로 취급하지 않는다.
+
+- 문서 최대 512 KiB, 청크 최대 32개, 청크당 원문 16 KiB·64블록. 2 KiB 미만의 작은 섹션은 인접 섹션과 묶을 수 있다. Heading 우선 계획이 32청크를 넘으면 인접 섹션을 크기/블록 상한까지 다시 묶고 그래도 초과하면 실패한다. 큰 단일 블록은 줄 경계, 긴 한 줄은 Unicode 코드 포인트 경계로 나눈다. CRLF·원문 offset을 보존한다.
+- 각 청크는 Concept 최대 16개, 전체 원시 후보 최대 128개. 초과 시 잘라내지 않고 실패한다. 직렬 extraction 후 여러 청크이면 문서 Domain/Type 집계 최대 1회, 서로 다른 청크에서 남은 이름 후보가 있으면 의미 통합 최대 1회다. 논리 호출 최대 34회, 기존 1회 재시도를 포함한 HTTP 전송 최대 68회다.
+- 각 모델 입력 JSON은 96 KiB 이하로 제한한다. 추출 입력은 호출 전 전부 검사하고, 모델 출력으로 생성되는 후속 입력은 해당 호출 전에 검사한다. 한도 초과·중간 실패·파일 무효화 시 후속 호출을 중단하고 기존 정상 미리보기를 유지한다.
+- 문서 분류는 청크별 Domain/Type 신호와 개념 이름을 종합한다. 한 청크 문서는 추출 응답의 분류를 사용한다. 집계·통합에서 원문 전체를 재전송하지 않는다. Catalog는 실행 시작 시 승인 스냅샷만 사용한다.
+- Evidence 그룹 안의 block ID는 청크 내 연속 순서이고, 그룹 간에는 떨어져 있어도 된다. Concept 간 원문 공유도 허용한다. 가짜 ID·임의 위치·빈 Evidence·요약 필드는 거부한다.
+- 통합은 후보 ID를 정확히 한 번씩 배분해야 하며 원문 배분 의무와는 다르다. 통합 응답에 Evidence 작성은 허용하지 않는다. 근거와 라벨은 로컬에서 병합한다.
+- Gemini 미리보기 schemaVersion 4, 저장 data.json v3 유지. legacy 로컬 Frame은 변환하지 않으며 구 Gemini preview는 원래 메모리 전용이므로 재실행한다.
+- 기존 호출 purpose를 유지하고 trace에 framingRunId·stage·chunkId·버전·입력 해시·budget을 추가한다. 각 논리 호출 runId를 구별하여 재시도/늦은 응답이 다른 청크 이력을 덮지 않게 한다.
+
+v0.6/2R(2026-09-16)은 최신 사용자 결정에 따라 partition을 폐기한다. 문서 중 일부만 Evidence로 선택하며 빈 Concept 결과도 정상이다. 이전 FR/AC의 ID는 유지하고 Concept/Evidence로 observable behavior를 갱신했다. Safe Reframing·영구 사용자 annotation·질문은 후속이다.

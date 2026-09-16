@@ -11,6 +11,7 @@ import { GeminiClient, GeminiError } from './gemini';
 import { GeminiFramer, Preview } from './framing';
 import { AttemptJournal, attemptSummary } from './attempts';
 import { domainKey } from './domains';
+import { BUDGET } from './budget';
 const VIEW = 'document-framer-view';
 // 비동기 작업이 시작한 파일 객체와 경로 세대를 기억한다. 같은 경로에 새 파일이 생겨도 구별한다.
 interface SourceTicket { path: string; file: TFile; generation: number }
@@ -153,7 +154,7 @@ export default class DocumentFramer extends Plugin {
           }
           this.previewStatuses.set(path, 'Gemini 분류 중…'); this.refresh();
           this.ensureGeminiReady();
-          const preview = await this.framer.generate({ path, basename: file.basename, ctime: file.stat.ctime, mtime: file.stat.mtime, text }, this.key.read() ?? '', this.store.getDomains(), 'classification', () => this.valid(ticket));
+          const preview = await this.framer.generate({ path, basename: file.basename, ctime: file.stat.ctime, mtime: file.stat.mtime, text }, this.key.read() ?? '', this.store.getDomains(), 'classification', () => this.valid(ticket), message => { if (this.valid(ticket)) { this.previewStatuses.set(path, message); this.refresh(); } });
           if (!this.valid(ticket)) continue;
           // 검증된 결과만 메모리에 게시한다. 저장된 로컬 Frame은 이 경로에서 갱신하지 않는다.
           this.previews.set(path, preview);
@@ -248,6 +249,7 @@ class FrameView extends ItemView {
     this.contentEl.createEl('p', { text: state, attr: { role: 'status' } });
     this.contentEl.createEl('p', { text: '마지막 원문 변경 후 60초가 지나면 요청을 실행합니다.' });
     this.contentEl.createEl('h3', { text: '2단계 · Gemini 미리보기' });
+    this.contentEl.createEl('p', { text: `문서당 최대 ${BUDGET.maxChunks}개 청크 · ${BUDGET.maxLogicalRequests}회 요청 (재시도 포함 ${BUDGET.maxHttpAttempts}회 전송). 짧은 문서는 1회 추출합니다.` });
     this.contentEl.createEl('p', { text: '요청 시 현재 문서 텍스트를 Google Gemini로 전송합니다. API 이용 요금이 발생할 수 있습니다. 결과는 별도 미리보기로만 표시됩니다.' });
     this.contentEl.createEl('p', { text: '무상 API의 입력·출력은 제품 개선과 사람 검토에 이용될 수 있습니다. 비민감 문서로 평가하고 적용 조건·지역 예외는 설정의 공식 정책 안내를 확인하세요.' });
     const generate = this.contentEl.createEl('button', { text: 'Gemini 미리보기 요청' });
@@ -264,7 +266,7 @@ class FrameView extends ItemView {
       inspect.onclick = () => this.plugin.showPreview(path);
     }
     if (frame) {
-      this.contentEl.createEl('h3', { text: '저장된 테스트 결과' });
+      this.contentEl.createEl('h3', { text: '저장된 Legacy 테스트 결과' });
       this.contentEl.createEl('p', { text: '요청 당시 결과입니다. 수정한 문서는 다시 Framing을 요청하세요.' });
       const details = this.contentEl.createEl('details');
       details.createEl('summary', { text: 'Developer Details' });
@@ -312,11 +314,23 @@ class PreviewModal extends Modal {
     if (this.message) this.contentEl.createEl('p', { text: this.message, attr: { role: 'status' } });
     this.contentEl.createEl('h3', { text: 'Document Type' });
     this.contentEl.createEl('p', { text: frame.document.type.id });
-    this.contentEl.createEl('h3', { text: 'Knowledge Units' });
-    for (const [index, unit] of frame.knowledgeUnits.entries()) {
-      this.contentEl.createEl('h4', { text: `Unit ${index + 1} · ${unit.source.startLine}~${unit.source.endLine}행` });
-      this.contentEl.createEl('p', { text: unit.labels.map(a => a.id).join(' · ') });
-      this.contentEl.createEl('pre').createEl('code', { text: sourceText.slice(unit.source.startOffset, unit.source.endOffset) });
+    this.contentEl.createEl('h3', { text: 'Key Concepts' });
+    this.contentEl.createEl('p', { text: '핵심 개념을 뒷받침하는 원문만 표시합니다. 포함되지 않은 내용도 원문에 보존됩니다. 중요 표시는 이 미리보기에서만 유지됩니다.' });
+    if (!frame.concepts.length) this.contentEl.createEl('p', { text: '재사용할 핵심 개념을 찾지 못했습니다. 원문은 그대로 보존됩니다.' });
+    for (const concept of frame.concepts) {
+      const section = this.contentEl.createEl('section');
+      section.createEl('h4', { text: concept.concept });
+      const highlight = section.createEl('button', { text: concept.highlight ? '중요 표시 해제' : '중요 표시', attr: { 'aria-pressed': String(concept.highlight) } });
+      highlight.onclick = () => {
+        // AI 응답에는 highlight가 없다. 사용자의 명시적 클릭만 현재 미리보기 값을 바꾼다.
+        if (this.plugin.previews.get(frame.document.path) !== this.preview) return;
+        concept.highlight = !concept.highlight; this.render();
+      };
+      for (const evidence of concept.evidence) {
+        section.createEl('p', { text: `Evidence · ${evidence.startLine}~${evidence.endLine}행` });
+        section.createEl('p', { text: evidence.labels.map(a => a.id).join(' · ') });
+        section.createEl('pre').createEl('code', { text: sourceText.slice(evidence.startOffset, evidence.endOffset) });
+      }
     }
     // 개발 정보는 기본으로 접는다. confidence는 원래 Frame 안에 보존한다.
     const details = this.contentEl.createEl('details');

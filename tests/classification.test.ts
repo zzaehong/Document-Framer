@@ -2,13 +2,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { extractBlocks } from '../src/blocks';
-import { Classification, validateClassification } from '../src/classification';
-import { GeminiFramer, MAX_AI_BYTES, MAX_BLOCKS } from '../src/framing';
+import { validateExtraction } from '../src/concepts';
+import { BUDGET } from '../src/budget';
+import { GeminiFramer } from '../src/framing';
 import { GeminiClient, HttpRequest } from '../src/gemini';
-const valid = (ids = ['b1', 'b2']): Classification => ({
+const valid = (ids = ['b1', 'b2']) => ({
   domains: [{ path: ['Engineering', 'Computer Science', 'Artificial Intelligence'], source: 'new', confidence: 0.8 }, { path: ['Business'], source: 'new', confidence: 0.4 }],
   type: { id: 'prose-with-decision', confidence: 0.9 },
-  units: [{ blockIds: ids, labels: [{ id: 'observation', confidence: 0.7 }, { id: 'decision', confidence: 0.9 }] }],
+  concepts: [{ concept: 'Architectural Decision', confidence: 0.8, evidence: [{ blockIds: ids, labels: [{ id: 'observation', confidence: 0.7 }, { id: 'decision', confidence: 0.9 }] }] }],
 });
 // 여러 Markdown 요소와 한글·이모지·CRLF에서도 블록의 원문 범위가 정확한지 확인한다.
 test('blocks retain exact CRLF and Unicode offsets across headings, lists, quotes, tables and fences', () => {
@@ -30,31 +31,26 @@ test('empty, malformed Markdown and unclosed fences retain readable content with
     assert.equal(blocks.at(-1)?.source.endOffset, text.length);
   }
 });
-// 복수 분야·계층형 분야 ID·복수 라벨과 분류 불가 값이 계약에 맞으면 허용하는지 확인한다.
-test('valid multi-domain, hierarchy IDs, multi-label and Other/unclassified accepted', () => {
-  const blocks = extractBlocks('# 제목\n\n결정 내용');
-  assert.deepEqual(validateClassification(valid(), blocks), valid());
-  const other = valid(); other.domains = [{ path: ['Other'], source: 'unclassified', confidence: 0.1 }];
-  other.type = { id: 'unclassified', confidence: 0 };
-  other.units[0].labels = [{ id: 'unclassified', confidence: 0 }];
-  assert.deepEqual(validateClassification(other, blocks), other);
-});
-// 알 수 없는 분류·추가 필드·잘못된 확신도와 블록 누락·중복·순서 변경을 거부하는지 확인한다.
-test('schema rejects unknown taxonomy, extra fields, confidence errors and missing/duplicate/reordered block coverage', () => {
+// Label/Type/원문 참조 회귀를 새 Evidence 계약에서 확인한다. 원문 미선택은 이제 정상이다.
+test('extraction rejects invalid labels, confidence, unknown references and forged source fields', () => {
   const blocks = extractBlocks('# 제목\n\n결정 내용');
   const mutations: ((v: any) => void)[] = [
-    v => { v.domains[0].id = 'invented'; }, v => { v.type.id = 'summary'; }, v => { v.units[0].labels[0].id = 'new'; },
-    v => { v.type.confidence = 1.1; }, v => { v.type.confidence = -0.1; }, v => { v.type.confidence = NaN; }, v => { v.type.confidence = '0.9'; },
-    v => { v.units[0].labels = []; }, v => { v.domains = []; }, v => { v.domains.push(v.domains[0]); },
-    v => { v.domains.push({ path: ['Other'], source: 'unclassified', confidence: 1 }); }, v => { v.units[0].labels.push({ id: 'unclassified', confidence: 0 }); },
-    v => { v.metadata = { path: 'injected' }; }, v => { v.units[0].source = { startLine: 999 }; },
-    v => { v.units[0].blockIds = ['b1']; }, v => { v.units[0].blockIds = ['b2', 'b1']; }, v => { v.units[0].blockIds = ['b1', 'b1']; },
-    v => { v.units[0].blockIds = ['b1', 'b99']; }, v => { v.units = []; }, v => { delete v.type; },
+    v => { v.type.id = 'summary'; }, v => { v.type.confidence = NaN; },
+    v => { v.concepts[0].evidence[0].labels[0].id = 'new'; },
+    v => { v.concepts[0].evidence[0].labels = []; },
+    v => { v.concepts[0].evidence[0].labels.push({ id: 'unclassified', confidence: 0 }); },
+    v => { v.concepts[0].evidence[0].startLine = 999; },
+    v => { v.concepts[0].evidence[0].text = 'AI summary'; },
+    v => { v.concepts[0].evidence[0].blockIds = ['b2', 'b1']; },
+    v => { v.concepts[0].evidence[0].blockIds = ['b1', 'b1']; },
+    v => { v.concepts[0].evidence[0].blockIds = ['b1', 'b99']; },
+    v => { v.concepts[0].evidence = []; }, v => { delete v.type; },
   ];
-  for (const mutate of mutations) { const v = valid(); mutate(v); assert.throws(() => validateClassification(v, blocks), /검증 실패/); }
+  for (const mutate of mutations) { const value = valid(); mutate(value); assert.throws(() => validateExtraction(value, blocks, [], 'chunk-1'), /검증 실패/); }
+  assert.equal(validateExtraction(valid(['b2']), blocks, [], 'chunk-1').concepts[0].evidence[0].startLine, 3);
 });
-// 문서당 한 번 호출하고 ID·텍스트만 전송하며 메타데이터·원문 위치는 로컬에서 조립하는지 확인한다.
-test('one document call constructs preview with local metadata and locations; only IDs/text sent', async () => {
+
+test('short document uses one extraction call and constructs local concept evidence', async () => {
   const requests: HttpRequest[] = [];
   const framer = new GeminiFramer(new GeminiClient(async request => {
     requests.push(request);
@@ -66,20 +62,21 @@ test('one document call constructs preview with local metadata and locations; on
   assert.equal(requests.length, 1); assert.deepEqual(source, before);
   assert.ok(!requests[0].body.includes(source.path));
   const sent = JSON.parse(JSON.parse(requests[0].body).contents[0].parts[0].text);
-  assert.deepEqual(Object.keys(sent.blocks[0]), ['id', 'text']);
+  assert.deepEqual(Object.keys(sent.blocks[0]), ['id', 'kind', 'text']);
   assert.equal(preview.frame.document.createdAt, 123);
   assert.equal(preview.frame.document.title, '제목 😀');
-  assert.deepEqual(preview.frame.document.domains[0].path, ['Engineering', 'Computer Science', 'Artificial Intelligence']);
-  assert.equal(preview.frame.knowledgeUnits[0].source.endOffset, source.text.length);
+  assert.equal(preview.frame.concepts[0].evidence[0].endOffset, source.text.length);
   assert.equal(preview.frame.previewOnly, true);
   assert.equal(preview.frame.document.importance, null);
-  assert.equal(preview.frame.knowledgeUnits[0].highlight, false);
+  assert.equal(preview.frame.concepts[0].highlight, false);
+  assert.equal(preview.frame.schemaVersion, 4);
+  assert.ok(!('knowledgeUnits' in preview.frame));
 });
-// 입력 한도 오류는 전송 전에 막고 잘못된 분류를 고치려는 추가 API 호출은 하지 않는지 확인한다.
-test('empty/oversized/too many blocks fail before network; invalid classification never triggers repair call', async () => {
+
+test('empty and over-budget documents fail before network; malformed extraction never gets repair call', async () => {
   let calls = 0;
   const framer = new GeminiFramer(new GeminiClient(async () => { calls++; return { status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '{}' }] } }] }) }; }));
-  for (const text of ['', 'x'.repeat(MAX_AI_BYTES + 1), '# h\n'.repeat(MAX_BLOCKS + 1)]) await assert.rejects(framer.generate({ path: 'a', basename: 'a', ctime: 0, mtime: 0, text }, 'key'));
+  for (const text of ['', 'x'.repeat(BUDGET.maxDocumentBytes + 1), '# h\n'.repeat(BUDGET.maxBlocksPerChunk * BUDGET.maxChunks + 1)]) await assert.rejects(framer.generate({ path: 'a', basename: 'a', ctime: 0, mtime: 0, text }, 'key'));
   assert.equal(calls, 0);
   await assert.rejects(framer.generate({ path: 'a', basename: 'a', ctime: 0, mtime: 0, text: 'body' }, 'key'), /검증 실패/);
   assert.equal(calls, 1);
